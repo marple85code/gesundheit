@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 APP = "GesundheitsApp"
-VERSION = "1.1"
+VERSION = "1.2"
 STANDARD_ZEITZONE = "Europe/Berlin"
 UTC = timezone.utc
 
@@ -1101,6 +1101,9 @@ def aktivitaet_kompakt(a: dict) -> dict:
         out["gps"] = True
     if a.get("pr"):
         out["pr"] = True
+    kinder = a.get("childIds")
+    if isinstance(kinder, list) and kinder:
+        out["kinder"] = [str(k) for k in kinder if isinstance(k, (int, str))][:12]
     return out
 
 
@@ -1528,8 +1531,11 @@ class GarminSammler:
             alt = alle.get(schluessel)
             if alt is None:
                 neu += 1
-            elif alt.get("det"):
-                k["det"] = True
+            else:
+                # Was beim Laden der Details dazukam, bleibt erhalten (Details, GPS-Spur, Teilaktivitäten)
+                for feld in ("det", "gps", "kinder", "kinder_gesucht"):
+                    if alt.get(feld) and not k.get(feld):
+                        k[feld] = alt[feld]
             alle[schluessel] = k
             jahr = str(k.get("start") or "")[:4]
             if jahr.isdigit():
@@ -1566,10 +1572,40 @@ class GarminSammler:
                 self.z["akt_alle"] = True
                 return
 
+    def _kinder(self, a: dict) -> list[str]:
+        """Teilaktivitäten einer Multisport-Aktivität (die GPS-Spur steckt in den Teilen)."""
+        if a.get("kinder"):
+            return list(a["kinder"])
+        if a.get("typ") not in ("multi_sport", "multisport") or a.get("kinder_gesucht"):
+            return []
+        a["kinder_gesucht"] = True
+        try:
+            voll = self.g.rufe("get_activity", str(a["id"]))
+        except NichtVerfuegbar:
+            return []
+        if not isinstance(voll, dict):
+            return []
+        meta = voll.get("metadataDTO") if isinstance(voll.get("metadataDTO"), dict) else {}
+        kinder = meta.get("childIds") or voll.get("childIds")
+        if isinstance(kinder, list) and kinder:
+            a["kinder"] = [str(k) for k in kinder if isinstance(k, (int, str))][:12]
+        return list(a.get("kinder") or [])
+
     def details(self, anzahl: int, reserve: int = 0) -> None:
         alle = self._aktivitaeten()
+        if not self.z.get("multisport_spur"):
+            # Einmalig nach dem Update auf 1.2: Multisport-Aktivitäten ohne Spur noch einmal holen,
+            # denn erst seitdem wird die Spur aus den Teilaktivitäten zusammengesetzt
+            for a in alle.values():
+                if a.get("typ") in ("multi_sport", "multisport") and a.get("det") and not a.get("gps") and not a.get("kinder_gesucht"):
+                    a["det"] = False
+            self.z["multisport_spur"] = True
+        neu_ab = (self.heute() - timedelta(days=3)).isoformat()
+        # Neue Aktivitäten zuerst, danach solche mit GPS (für die Karte), jeweils die neuesten zuerst
         offen = sorted((a for a in alle.values() if not a.get("det")),
-                       key=lambda a: str(a.get("start") or ""), reverse=True)
+                       key=lambda a: (str(a.get("start") or "") >= neu_ab,
+                                      bool(a.get("gps") or a.get("kinder") or a.get("typ") in ("multi_sport", "multisport")),
+                                      str(a.get("start") or "")), reverse=True)
         for a in offen[:anzahl]:
             if self.g.rest() <= reserve + 3:
                 return
@@ -1589,8 +1625,24 @@ class GarminSammler:
                     zonen = self.g.rufe("get_activity_hr_in_timezones", aid)
                 except NichtVerfuegbar:
                     pass
-            self.ablage.schreiben(f"d/akt/{aid}.enc", details_kompakt(det, runden_daten, zonen))
+            kompakt = details_kompakt(det, runden_daten, zonen)
+            if not kompakt["track"]:
+                # Multisport: Spur aus den Teilaktivitäten zusammensetzen
+                for kind in self._kinder(a)[:8]:
+                    if self.g.rest() <= reserve + 3:
+                        break
+                    try:
+                        teil = details_kompakt(self.g.rufe("get_activity_details", kind, 600, 1500), None, None)
+                    except NichtVerfuegbar:
+                        continue
+                    kompakt["track"].extend(teil["track"])
+                if len(kompakt["track"]) > 2500:
+                    schritt = len(kompakt["track"]) / 2500
+                    kompakt["track"] = [kompakt["track"][int(i * schritt)] for i in range(2500)]
+            self.ablage.schreiben(f"d/akt/{aid}.enc", kompakt)
             a["det"] = True
+            if kompakt["track"]:
+                a["gps"] = True
             self.neu["details"] += 1
 
     # ---- Tagesverlaeufe -----------------------------------------------------

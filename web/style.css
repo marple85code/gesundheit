@@ -43,7 +43,7 @@
   --phase-wach: #86b6ef; --phase-rem: #5598e7; --phase-leicht: #256abf; --phase-tief: #104281;
   --zone-1: #86b6ef; --zone-2: #5598e7; --zone-3: #2a78d6; --zone-4: #1c5cab; --zone-5: #104281;
   /* Zustand (fest, immer mit Text) */
-  --gut: #0ca30c; --gut-text: #006300; --warnung: #fab219; --ernst: #ec835a; --kritisch: #d03b3b;
+  --gut: #0ca30c; --gut-text: #006300; --warnung: #fab219; --ernst: #ec835a; --kritisch: #d03b3b; --kritisch-text: #b02a2a;
 
   --radius-gross: 18px;
   --radius: 14px;
@@ -66,7 +66,7 @@
     --serie-grau: #56656b;
     --phase-wach: #184f95; --phase-rem: #2a78d6; --phase-leicht: #6da7ec; --phase-tief: #b7d3f6;
     --zone-1: #184f95; --zone-2: #256abf; --zone-3: #3987e5; --zone-4: #6da7ec; --zone-5: #9ec5f4;
-    --gut-text: #0ca30c;
+    --gut-text: #0ca30c; --kritisch-text: #ff8a80;
   }
 }
 :root[data-theme="dark"] {
@@ -81,7 +81,7 @@
   --serie-grau: #56656b;
   --phase-wach: #184f95; --phase-rem: #2a78d6; --phase-leicht: #6da7ec; --phase-tief: #b7d3f6;
   --zone-1: #184f95; --zone-2: #256abf; --zone-3: #3987e5; --zone-4: #6da7ec; --zone-5: #9ec5f4;
-  --gut-text: #0ca30c;
+  --gut-text: #0ca30c; --kritisch-text: #ff8a80;
 }
 
 /* ---------------------------------------------------------------- Grundlagen */
@@ -186,7 +186,7 @@ main.seite {
 /* Navigation unten (Handy) */
 .leiste {
   position: fixed; inset: auto 0 0 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   padding-bottom: env(safe-area-inset-bottom);
   background: var(--blatt);
   border-top: 1px solid var(--linie);
@@ -198,6 +198,7 @@ main.seite {
   color: var(--tinte-3); text-decoration: none; font-size: 12px; font-weight: 500;
 }
 .leiste a svg { width: 24px; height: 24px; }
+@media (max-width: 370px) { .leiste a { font-size: 11px; letter-spacing: -0.01em; } }
 .leiste a[aria-current="page"] { color: var(--tinte); font-weight: 650; }
 .leiste a[aria-current="page"]::before {
   content: ""; position: absolute; top: -1px; left: 28%; right: 28%; height: 3px;
@@ -206,7 +207,7 @@ main.seite {
 .seitenleiste { display: none; }
 
 @media (min-width: 960px) {
-  .app { display: grid; grid-template-columns: 232px 1fr; }
+  .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); }
   .leiste { display: none; }
   .seitenleiste {
     display: flex; flex-direction: column; gap: 2px;
@@ -216,7 +217,7 @@ main.seite {
   .seitenleiste .marke { display: flex; align-items: center; gap: 10px; padding: 4px 10px 22px; font-size: 19px; font-weight: 700; }
   .seitenleiste .marke svg { width: 30px; height: 30px; }
   .seitenleiste a {
-    display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
+    position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
     color: var(--tinte-2); text-decoration: none; font-weight: 500;
   }
   .seitenleiste a svg { width: 22px; height: 22px; flex: none; }
@@ -501,6 +502,7 @@ a.zeile:hover { background: var(--wash); }
 
 /* ---------------------------------------------------------------- Karte */
 .karte { height: 300px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--linie); background: var(--blatt-2); z-index: 0; }
+.karte .leaflet-tile-pane { filter: saturate(0.35) brightness(1.03) contrast(0.94); }
 @media (min-width: 960px) { .karte { height: 400px; } }
 :root[data-theme="dark"] .karte .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.92) saturate(0.6); }
 @media (prefers-color-scheme: dark) {
@@ -595,6 +597,111 @@ textarea.eingabe { min-height: 92px; resize: vertical; line-height: 1.4; }
 .kamera { position: relative; margin-top: 16px; border-radius: var(--radius); overflow: hidden; background: #000; aspect-ratio: 1; }
 .kamera video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .kamera::after { content: ""; position: absolute; inset: 18%; border: 3px solid rgba(255, 255, 255, 0.85); border-radius: 18px; }
+
+/* ---------------------------------------------------------------- Werte außerhalb des Optimalbereichs */
+.achtung { display: inline-grid; place-items: center; flex: none; line-height: 0; color: var(--kritisch); }
+.kachel > .achtung { position: absolute; top: 11px; right: 11px; }
+.kachel.auffaellig { border-color: color-mix(in srgb, var(--kritisch) 40%, var(--linie)); }
+.kachel.auffaellig .kachel-titel { padding-right: 24px; }
+.kachel-befund, .befund-kurz { font-size: 12.5px; font-weight: 600; line-height: 1.3; color: var(--kritisch-text); }
+.kachel-wert.text { font-size: 20px; line-height: 1.2; hyphens: manual; overflow-wrap: break-word; }
+.werte li.auffaellig .zahl { display: inline-flex; align-items: center; gap: 6px; }
+.befunde { display: grid; gap: 12px; margin: 0 0 20px; }
+.befund {
+  padding: 14px 16px 12px; border-radius: var(--radius); background: var(--blatt);
+  border: 1px solid var(--linie); border-left: 4px solid var(--kritisch);
+}
+.befund-kopf { display: flex; gap: 12px; align-items: flex-start; }
+.befund-kopf .achtung { margin-top: 1px; }
+.befund h3 { font-size: 16px; font-weight: 650; }
+.befund-wert { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 4px; font-size: 13px; color: var(--tinte-2); }
+.befund-wert b { font-size: 15px; font-weight: 650; color: var(--tinte); }
+.befund-text { margin-top: 10px; font-size: 15px; color: var(--tinte-2); max-width: 68ch; }
+.befund-arzt {
+  margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-klein); max-width: 68ch;
+  background: color-mix(in srgb, var(--kritisch) 9%, var(--blatt)); font-size: 14.5px; color: var(--tinte);
+}
+.befund.stufe-kritisch .befund-arzt { font-weight: 560; }
+.befund-tipps { margin-top: 8px; }
+.befund-tipps summary {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; list-style: none;
+  font-size: 14.5px; font-weight: 600; color: var(--tinte);
+}
+.befund-tipps summary::-webkit-details-marker { display: none; }
+.befund-tipps summary::before {
+  content: ""; width: 7px; height: 7px; margin: 0 2px 2px 2px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg);
+}
+.befund-tipps[open] summary::before { transform: rotate(45deg); margin-bottom: 4px; }
+.befund-tipps ul { display: grid; gap: 6px; margin: 4px 0 4px; padding-left: 20px; font-size: 14.5px; color: var(--tinte-2); max-width: 68ch; }
+.befund-link { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 14px; font-weight: 600; color: var(--tinte); text-decoration: none; }
+.befund-link:hover { text-decoration: underline; }
+@media (prefers-reduced-motion: no-preference) { .befund-tipps summary::before { transition: transform 150ms ease; } }
+
+/* Tab Hinweise */
+.hinweise-lead {
+  max-width: 34ch; margin: 14px 0 12px; font-size: clamp(22px, 5.6vw, 32px); line-height: 1.25;
+  font-weight: 360; letter-spacing: -0.01em; color: var(--tinte-2); text-wrap: pretty;
+}
+.hinweise-lead strong { font-weight: 680; color: var(--tinte); }
+.ok-liste { list-style: none; margin: 0; padding: 0; }
+.ok-liste li {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "s n w" ". z z";
+  gap: 2px 10px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--linie);
+}
+.ok-symbol { grid-area: s; align-self: center; line-height: 0; color: var(--gut-text); }
+.ok-name { grid-area: n; font-weight: 550; }
+.ok-wert { grid-area: w; font-weight: 620; text-align: right; font-variant-numeric: tabular-nums; }
+.ok-ziel { grid-area: z; font-size: 13px; color: var(--tinte-3); }
+@media (min-width: 640px) {
+  .ok-liste li { grid-template-columns: 22px minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 1.2fr); grid-template-areas: "s n w z"; }
+  .ok-ziel { text-align: right; }
+}
+.fehlt-liste, .quellen { display: grid; gap: 7px; margin: 0; padding-left: 20px; font-size: 14.5px; color: var(--tinte-2); max-width: 78ch; }
+.quellen a { color: var(--tinte-2); text-underline-offset: 2px; }
+
+/* Zähler am Tab Hinweise */
+.nav-marke {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--kritisch); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.leiste a .nav-marke { position: absolute; top: 5px; left: calc(50% + 4px); height: 20px; line-height: 16px; border: 2px solid var(--blatt); }
+.seitenleiste a .nav-marke { margin-left: auto; }
+
+/* Karte der Strecke */
+.karten-box { display: flex; flex-direction: column; gap: 10px; }
+.karte-legende { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 13px; color: var(--tinte-2); }
+.karte-legende > span { display: inline-flex; align-items: center; gap: 6px; }
+.karte-legende i.kasten { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.karte-legende small { font-size: 12px; color: var(--tinte-3); }
+.karte-legende .verlauf-balken { gap: 0; }
+.karte-legende .verlauf-balken i.kasten { width: 18px; height: 10px; border-radius: 0; }
+.karte-legende .verlauf-balken i.kasten:first-child { border-radius: 3px 0 0 3px; }
+.karte-legende .verlauf-balken i.kasten:last-child { border-radius: 0 3px 3px 0; }
+.karte-km { display: grid; place-items: center; }
+.karte-km span {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--blatt); color: var(--tinte); font: 700 11px/1 var(--schrift);
+  box-shadow: 0 0 0 1.5px var(--tinte-3), 0 1px 3px rgba(8, 18, 22, 0.25);
+}
+.leaflet-tooltip.karte-schild {
+  padding: 3px 9px; border: 0; border-radius: 999px; background: var(--tinte); color: var(--blatt);
+  font: 650 12.5px/1.35 var(--schrift); box-shadow: 0 2px 8px rgba(8, 18, 22, 0.25);
+}
+.leaflet-tooltip-top.karte-schild::before { border-top-color: var(--tinte); }
+.karte-knopf {
+  display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border-radius: 8px;
+  border: 2px solid rgba(0, 0, 0, 0.2); background: #fff; background-clip: padding-box; color: #12262e; cursor: pointer;
+}
+.karte-knopf:hover { background-color: #f4f4f4; }
+.karten-box.gross {
+  position: fixed; inset: 0; z-index: 60; margin: 0;
+  padding: calc(10px + env(safe-area-inset-top)) 10px calc(10px + env(safe-area-inset-bottom));
+  background: var(--papier);
+}
+.karten-box.gross .karte { flex: 1; height: auto; min-height: 0; }
+.karten-box.gross > .fussnote { display: none; }
+html.karte-offen, html.karte-offen body { overflow: hidden; }
 
 /* ---------------------------------------------------------------- Bewegung */
 @media (prefers-reduced-motion: no-preference) {

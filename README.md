@@ -8,4 +8,7 @@ Persönliche Web-App mit allen Daten von Withings und Garmin Connect.
   Der Schlüssel steht im Repository-Geheimnis `GESUNDHEIT_SCHLUESSEL` und auf deinen Geräten.
   Die Protokolle der Abläufe enthalten keine Messwerte. Der Token des Sync-Knopfs liegt ebenfalls nur verschlüsselt vor und darf nur Abläufe starten.
 
+- **Wiederherstellen:** Der Ablauf „Wiederherstellen“ wird nur vom Einrichtungsfenster benutzt, wenn dort die Einrichtungsdaten fehlen.
+  Er gibt den Schlüssel ausschließlich verschlüsselt für das anfragende Fenster zurück.
+
 Eingerichtet und gepflegt mit dem Einrichtungsfenster (`einrichtung.py`) auf dem Chromebook.
