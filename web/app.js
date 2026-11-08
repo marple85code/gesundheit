@@ -1,0 +1,2493 @@
+/* Gesundheit - Web-App
+   Liest die verschlüsselten Daten (d/*.enc) und zeigt sie an. Entschlüsselt wird nur im Browser. */
+(() => {
+"use strict";
+
+const APP_VERSION = "1.1";
+const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
+const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const speicher = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* ohne Speicher */ } },
+};
+
+// ======================================================================
+// DOM-Hilfen
+// ======================================================================
+function h(tag, attrs, ...kinder) {
+  const e = document.createElement(tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2), v);
+    else if (k === "style" && typeof v === "object") Object.assign(e.style, v);
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kinder.flat(3)) {
+    if (k == null || k === false) continue;
+    e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  }
+  return e;
+}
+const SVGNS = "http://www.w3.org/2000/svg";
+function s(tag, attrs, ...kinder) {
+  const e = document.createElementNS(SVGNS, tag);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v);
+  for (const k of kinder.flat()) if (k != null) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+}
+function esc(t) { return String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+const ICON = {
+  heute: '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M5.4 18.6 7 17M17 7l1.6-1.6"/>',
+  koerper: '<circle cx="12" cy="4.6" r="2.3"/><path d="M5.2 9.4 12 8l6.8 1.4M12 8v6.6M12 14.6 9 21.2M12 14.6l3 6.6"/>',
+  herz: '<path d="M12 20.4s-7.6-4.6-7.6-10.3A4.3 4.3 0 0 1 12 7.5a4.3 4.3 0 0 1 7.6 2.6c0 5.7-7.6 10.3-7.6 10.3Z"/>',
+  schlaf: '<path d="M19.6 14.7A8 8 0 1 1 9.3 4.4a6.4 6.4 0 0 0 10.3 10.3Z"/>',
+  sport: '<circle cx="12" cy="13.6" r="7.2"/><path d="M12 13.6V9.7M9.8 2.8h4.4M12 2.8v3.6M18.3 7.3l1.4-1.4"/>',
+  mehr: '<circle cx="5.5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="18.5" cy="12" r="1.5" fill="currentColor"/>',
+  tag: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.6"/><path d="M3.5 9.6h17M8 3v4M16 3v4"/>',
+  werte: '<path d="M4 19.5h16M7 16v-6M12 16V6M17 16v-4"/>',
+  status: '<circle cx="12" cy="12" r="8.6"/><path d="m8.3 12.3 2.4 2.4 5-5.2"/>',
+  zurueck: '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
+  vor: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
+  zu: '<path d="M6 6l12 12M18 6 6 18"/>',
+  info: '<circle cx="12" cy="12" r="8.6"/><path d="M12 11v5.2M12 7.7v.2"/>',
+  warnung: '<path d="M12 4 2.8 19.5h18.4Z"/><path d="M12 10v4.4M12 16.9v.2"/>',
+  kamera: '<path d="M4 8.5h3l1.6-2.5h6.8L17 8.5h3v10.5H4Z"/><circle cx="12" cy="13.4" r="3.4"/>',
+  ekg: '<path d="M2.5 12h4.2l1.8-4.6 3.2 9.6 2.4-7 1.6 2h5.8"/>',
+  lauf: '<circle cx="14.6" cy="4.4" r="1.9"/><path d="m10 21 2.4-5.4 2.9 2.4V22M7.6 11.4l2.8-3.2 4.1.5 2.3 3 2.6.6M12.4 15.6l1.3-6.4M8.6 13.8l-3.2.7"/>',
+  fahrrad: '<circle cx="6" cy="16" r="3.8"/><circle cx="18" cy="16" r="3.8"/><path d="m6 16 4.2-7.5h5.3M18 16l-3.6-7.5M10.2 8.5 12.5 16H18M13.3 6H16"/>',
+  kraft: '<path d="M3 9.5v5M21 9.5v5M5.8 7v10M18.2 7v10M5.8 12h12.4"/>',
+  wandern: '<path d="m2.5 19.5 6.2-9 3.6 4.8 2.5-3.3 6.7 7.5Z"/>',
+  schwimmen: '<path d="M2.5 16c2 1.4 3.8 1.4 5.8 0s3.8-1.4 5.8 0 3.8 1.4 5.8 0M2.5 20c2 1.4 3.8 1.4 5.8 0s3.8-1.4 5.8 0 3.8 1.4 5.8 0M6 12.5l4.5-4 3.5 3"/><circle cx="16" cy="7" r="2"/>',
+  gehen: '<circle cx="13" cy="4.4" r="1.9"/><path d="m10.4 21 1.7-6.2 2.6 2.4V21M9.2 12.4 11 8.2l2.6.2 1.6 3.5 2 1M12 14.8l1.2-6.4"/>',
+  yoga: '<circle cx="12" cy="5" r="2"/><path d="M4.5 18.5C7 17.5 9.5 17 12 17s5 .5 7.5 1.5M12 7.5v6M7 10.5l5 2 5-2"/>',
+  sonst: '<path d="M2.5 12h4l2-5 3.5 10 2.5-7 1.5 2h5.5"/>',
+  sync: '<path d="M19.4 9.2A7.6 7.6 0 0 0 5.3 7.6M4.6 14.8a7.6 7.6 0 0 0 14.1 1.6"/><path d="M5 3.6v4.3h4.3M19 20.4v-4.3h-4.3"/>',
+  haken: '<path d="m5.5 12.5 4.2 4.2 8.8-9.4"/>',
+  bericht: '<path d="M6.5 2.8h7.6l4.4 4.4v14H6.5Z"/><path d="M14 2.8v4.6h4.5M9.4 12.4h6.2M9.4 15.6h6.2M9.4 18.8h3.8"/>',
+  marke: '<rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="currentColor" stroke="none"/><path d="M5 12.6h3l1.5-3.6 2.6 7.4 2-5.2 1.1 1.4H19" stroke="var(--rose)" stroke-width="1.9"/>',
+};
+function icon(name, groesse = 24) {
+  const e = document.createElementNS(SVGNS, "svg");
+  e.setAttribute("viewBox", "0 0 24 24");
+  e.setAttribute("width", groesse);
+  e.setAttribute("height", groesse);
+  e.setAttribute("fill", "none");
+  e.setAttribute("stroke", "currentColor");
+  e.setAttribute("stroke-width", "1.8");
+  e.setAttribute("stroke-linecap", "round");
+  e.setAttribute("stroke-linejoin", "round");
+  e.setAttribute("aria-hidden", "true");
+  e.innerHTML = ICON[name] || ICON.sonst;
+  return e;
+}
+
+// ======================================================================
+// Zahlen, Daten und Zeiten (deutsch)
+// ======================================================================
+const ZF = new Map();
+function zahl(v, stellen = 0) {
+  if (v == null || !Number.isFinite(v)) return "–";
+  let f = ZF.get(stellen);
+  if (!f) { f = new Intl.NumberFormat("de-DE", { minimumFractionDigits: stellen, maximumFractionDigits: stellen }); ZF.set(stellen, f); }
+  return f.format(v);
+}
+function vorzeichen(v, stellen = 0) { return (v > 0 ? "+" : v < 0 ? "−" : "±") + zahl(Math.abs(v), stellen); }
+function zweistellig(n) { return String(n).padStart(2, "0"); }
+function isoDatum(d) { return `${d.getFullYear()}-${zweistellig(d.getMonth() + 1)}-${zweistellig(d.getDate())}`; }
+function heuteIso() { return isoDatum(new Date()); }
+function isoMinus(tage, basis = new Date()) { const d = new Date(basis); d.setDate(d.getDate() - tage); return isoDatum(d); }
+function tagMs(iso) { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).getTime(); }
+function isoAusMs(ms) { return isoDatum(new Date(ms)); }
+function isoPlus(iso, tage) { const d = new Date(tagMs(iso)); d.setDate(d.getDate() + tage); return isoDatum(d); }
+const DF = {
+  lang: new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long" }),
+  langJahr: new Intl.DateTimeFormat("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
+  kurz: new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short" }),
+  kurzJahr: new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short", year: "numeric" }),
+  wochentag: new Intl.DateTimeFormat("de-DE", { weekday: "short", day: "numeric", month: "short" }),
+  monat: new Intl.DateTimeFormat("de-DE", { month: "long", year: "numeric" }),
+  monatKurz: new Intl.DateTimeFormat("de-DE", { month: "short", year: "2-digit" }),
+  zeit: new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }),
+  datumZeit: new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+};
+function datum(x, art = "kurz") {
+  const d = typeof x === "string" ? new Date(tagMs(x)) : new Date(x);
+  if (art === "kurz" && d.getFullYear() !== new Date().getFullYear()) return DF.kurzJahr.format(d);
+  return DF[art].format(d);
+}
+function uhr(ms) { return DF.zeit.format(new Date(ms)); }
+const WOCHENTAG_KURZ = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+function kurzZeit(ms) { const d = new Date(ms); return `${WOCHENTAG_KURZ[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}., ${uhr(ms)}`; }
+function dauer(sek, lang = true) {
+  if (sek == null || !Number.isFinite(sek)) return "–";
+  const min = Math.round(sek / 60);
+  const std = Math.floor(min / 60);
+  const rest = min % 60;
+  if (!lang) return `${std}:${zweistellig(rest)}`;
+  if (std === 0) return `${rest} Min.`;
+  return rest ? `${std} Std. ${rest} Min.` : `${std} Std.`;
+}
+function zeitText(sek) {
+  if (sek == null || !Number.isFinite(sek)) return "–";
+  const s_ = Math.round(sek);
+  const std = Math.floor(s_ / 3600), min = Math.floor((s_ % 3600) / 60), sk = s_ % 60;
+  return std ? `${std}:${zweistellig(min)}:${zweistellig(sk)}` : `${min}:${zweistellig(sk)}`;
+}
+const RTF = new Intl.RelativeTimeFormat("de-DE", { numeric: "auto" });
+function vorZeit(iso) {
+  if (!iso) return "–";
+  const diff = (Date.parse(iso) - Date.now()) / 1000;
+  const a = Math.abs(diff);
+  if (a < 90) return "gerade eben";
+  if (a < 3600) return RTF.format(Math.round(diff / 60), "minute");
+  if (a < 86400) return RTF.format(Math.round(diff / 3600), "hour");
+  return RTF.format(Math.round(diff / 86400), "day");
+}
+function tempoText(mps, laufen) {
+  if (!mps || !Number.isFinite(mps)) return "–";
+  if (laufen) { const s_ = 1000 / mps; return `${Math.floor(s_ / 60)}:${zweistellig(Math.round(s_ % 60) % 60)}`; }
+  return zahl(mps * 3.6, 1);
+}
+function isoWoche(ms) {
+  const d = new Date(ms); d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const w1 = new Date(d.getFullYear(), 0, 4);
+  const kw = 1 + Math.round(((d - w1) / 86400000 - 3 + ((w1.getDay() + 6) % 7)) / 7);
+  return [d.getFullYear(), kw];
+}
+function mittel(werte) { const v = werte.filter(Number.isFinite); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+
+// ======================================================================
+// Schlüssel und Entschlüsselung (AES-256-GCM, gzip)
+// ======================================================================
+let AES = null;
+function b64u(text) {
+  const t = text.replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(t + "=".repeat((4 - (t.length % 4)) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+async function schluesselAktivieren(text) {
+  const roh = b64u(String(text).trim());
+  if (roh.length !== 32) throw new Error("falsche Länge");
+  AES = await crypto.subtle.importKey("raw", roh, "AES-GCM", false, ["decrypt"]);
+}
+async function entschluesseln(pfad, puffer) {
+  const b = new Uint8Array(puffer);
+  if (b[0] !== 71 || b[1] !== 83 || b[2] !== 68 || b[3] !== 49) throw new Error("unbekanntes Format");
+  const klar = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b.slice(4, 16), additionalData: new TextEncoder().encode(pfad) }, AES, b.slice(16));
+  const strom = new Blob([klar]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return JSON.parse(await new Response(strom).text());
+}
+class SchluesselFalsch extends Error {}
+
+// ======================================================================
+// Daten
+// ======================================================================
+const Daten = {
+  index: null,
+  cache: new Map(),
+  async ladeIndex() {
+    let r;
+    try { r = await fetch("d/index.enc?t=" + Date.now(), { cache: "no-store" }); } catch (e) { throw new Error("offline"); }
+    if (r.status === 404) { this.index = null; return null; }
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const puffer = await r.arrayBuffer();
+    try { this.index = await entschluesseln("d/index.enc", puffer); }
+    catch (e) { if (e && e.name === "OperationError") throw new SchluesselFalsch(); throw e; }
+    return this.index;
+  },
+  hat(pfad) { return Boolean(this.index && this.index.dateien && this.index.dateien[pfad]); },
+  async datei(pfad, standard = null) {
+    if (!this.hat(pfad)) return standard;
+    if (!this.cache.has(pfad)) {
+      const v = this.index.dateien[pfad];
+      const p = (async () => {
+        const r = await fetch(`${pfad}?v=${v}`);
+        if (!r.ok) throw new Error(`${pfad}: HTTP ${r.status}`);
+        return entschluesseln(pfad, await r.arrayBuffer());
+      })();
+      this.cache.set(pfad, p);
+      p.catch(() => this.cache.delete(pfad));
+    }
+    return this.cache.get(pfad);
+  },
+  async katalog() { return (await this.datei("d/katalog.enc")) || { werte: {}, texte: {}, jahre: [] }; },
+  async jahr(j) { return (await this.datei(`d/tage/${j}.enc`)) || { werte: {}, texte: {} }; },
+  async reihe(metrik, von = null, bis = null, art = "werte") {
+    const kat = await this.katalog();
+    const info = (kat[art] || {})[metrik];
+    if (!info) return [];
+    const [, a, b] = info;
+    const ab = von && von > a ? von : a;
+    const zu = bis && bis < b ? bis : b;
+    if (ab > zu) return [];
+    const jahre = (kat.jahre || []).filter((j) => j >= +ab.slice(0, 4) && j <= +zu.slice(0, 4));
+    const teile = await Promise.all(jahre.map((j) => this.jahr(j)));
+    const out = [];
+    for (const t of teile) for (const p of ((t[art] || {})[metrik] || [])) if (p[0] >= ab && p[0] <= zu) out.push(p);
+    return out;
+  },
+  texte(metrik, von, bis) { return this.reihe(metrik, von, bis, "texte"); },
+  async tageswerte(iso) {
+    const t = await this.jahr(+iso.slice(0, 4));
+    const out = {};
+    for (const [m, paare] of Object.entries(t.werte || {})) { const p = paare.find((x) => x[0] === iso); if (p) out[m] = p[1]; }
+    const texte = {};
+    for (const [m, paare] of Object.entries(t.texte || {})) { const p = paare.find((x) => x[0] === iso); if (p) texte[m] = p[1]; }
+    return { werte: out, texte };
+  },
+  async withings() {
+    const w = (await this.datei("d/withings.enc")) || { messungen: [], modelle: [] };
+    if (!w._typ) {
+      w._typ = new Map();
+      w._grp = new Map();
+      for (const r of w.messungen) {
+        const k = `${r[1]}|${r[3]}`;
+        if (!w._typ.has(k)) w._typ.set(k, []);
+        w._typ.get(k).push(r);
+        if (!w._grp.has(r[4])) w._grp.set(r[4], []);
+        w._grp.get(r[4]).push(r);
+      }
+    }
+    return w;
+  },
+  async aktivitaeten() { return ((await this.datei("d/aktivitaeten.enc")) || {}).liste || []; },
+  async withingsTrainings() { return ((await this.datei("d/withings_trainings.enc")) || {}).liste || []; },
+  async ekg() { return ((await this.datei("d/ekg.enc")) || {}).liste || []; },
+  async info(quelle) { return (await this.datei(`d/${quelle}_info.enc`)) || {}; },
+  async tag(iso) { return this.datei(`d/tag/${iso}.enc`); },
+};
+
+// ---- Withings-Messwerte
+function wReihe(w, typ, pos = -1) {
+  return (w._typ.get(`${typ}|${pos}`) || []).map((r) => [r[0] * 1000, r[2], r[4]]).sort((a, b) => a[0] - b[0]);
+}
+function wTaeglich(reihe) {
+  const m = new Map();
+  for (const [ts, v] of reihe) m.set(isoAusMs(ts), v);
+  return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+}
+function wLetzte(w, typ, pos = -1) { const r = wReihe(w, typ, pos); return r.length ? r[r.length - 1] : null; }
+function wGruppe(w, grpid) {
+  const out = {};
+  for (const r of w._grp.get(grpid) || []) out[r[3] === -1 ? r[1] : `${r[1]}.${r[3]}`] = r[2];
+  return out;
+}
+function blutdruckMessungen(w) {
+  const liste = [];
+  for (const [grpid, zeilen] of w._grp) {
+    const g = {};
+    let ts = 0;
+    for (const r of zeilen) { g[r[1]] = r[2]; ts = r[0]; }
+    if (g[10] && g[9]) liste.push({ ts: ts * 1000, sys: g[10], dia: g[9], puls: g[11] ?? null, grpid });
+  }
+  return liste.sort((a, b) => a.ts - b.ts);
+}
+function istMorgens(ms) { const st = new Date(ms).getHours(); return st >= 4 && st < 14; }
+
+const W_TYPEN = {
+  1: ["Gewicht", "kg", 1], 4: ["Größe", "m", 2], 5: ["Fettfreie Masse", "kg", 1], 6: ["Körperfettanteil", "%", 1],
+  8: ["Fettmasse", "kg", 1], 9: ["Blutdruck diastolisch", "mmHg", 0], 10: ["Blutdruck systolisch", "mmHg", 0], 11: ["Puls", "bpm", 0],
+  12: ["Temperatur", "°C", 1], 54: ["SpO₂", "%", 0], 71: ["Körpertemperatur", "°C", 1], 73: ["Hauttemperatur", "°C", 1],
+  76: ["Muskelmasse", "kg", 1], 77: ["Körperwasser", "kg", 1], 88: ["Knochenmasse", "kg", 2], 91: ["Pulswellengeschwindigkeit", "m/s", 1],
+  123: ["VO₂max", "ml/kg/min", 1], 130: ["Vorhofflimmern (EKG)", "", 0], 135: ["QRS-Dauer", "ms", 0], 136: ["PR-Intervall", "ms", 0],
+  137: ["QT-Intervall", "ms", 0], 138: ["QTc-Intervall", "ms", 0], 139: ["Vorhofflimmern (PPG)", "", 0], 140: ["Gefäßalter", "Jahre", 0],
+  155: ["Gefäßalter", "Jahre", 0], 158: ["Nervengesundheit linker Fuß", "", 0], 159: ["Nervengesundheit rechter Fuß", "", 0],
+  167: ["Nervengesundheit Füße", "", 0], 168: ["Extrazelluläres Wasser", "kg", 1], 169: ["Intrazelluläres Wasser", "kg", 1],
+  170: ["Viszeralfett", "", 1], 173: ["Fettfreie Masse", "kg", 2], 174: ["Fettmasse", "kg", 2], 175: ["Muskelmasse", "kg", 2],
+  196: ["Elektrodermale Aktivität Füße", "", 0], 197: ["Elektrodermale Aktivität links", "", 0], 198: ["Elektrodermale Aktivität rechts", "", 0],
+  226: ["Grundumsatz", "kcal", 0], 227: ["Stoffwechselalter", "Jahre", 0], 229: ["Elektrochemische Hautleitfähigkeit", "", 0],
+};
+const POSITIONEN = { 0: "rechtes Handgelenk", 1: "linkes Handgelenk", 2: "rechter Arm", 3: "linker Arm", 4: "rechter Fuß", 5: "linker Fuß",
+  8: "linke Körperhälfte", 9: "rechte Körperhälfte", 10: "linkes Bein", 11: "rechtes Bein", 12: "Rumpf", 13: "linke Hand", 14: "rechte Hand" };
+function wName(typ, pos = -1) {
+  const t = W_TYPEN[typ];
+  const name = t ? t[0] : `Messtyp ${typ}`;
+  return pos >= 0 ? `${name} – ${POSITIONEN[pos] || "Position " + pos}` : name;
+}
+
+// ---- Tageswerte: Bezeichnungen und kuratierte Kennzahlen
+const K = {
+  schritte: ["Schritte", "", 0, ["g.tag.totalSteps", "g.schritte.totalSteps", "w.aktivitaet.steps"]],
+  schrittziel: ["Schrittziel", "", 0, ["g.tag.dailyStepGoal", "g.schritte.stepGoal"]],
+  strecke: ["Strecke", "km", 1, [["g.tag.totalDistanceMeters", (v) => v / 1000], ["g.schritte.totalDistance", (v) => v / 1000], ["w.aktivitaet.distance", (v) => v / 1000]]],
+  ruhepuls: ["Ruhepuls", "bpm", 0, ["g.tag.restingHeartRate", "g.herz.restingHR", "g.schlaf.restingHeartRate"]],
+  stress: ["Stress im Tagesmittel", "", 0, ["g.tag.averageStressLevel", "g.stress.overallStressLevel"]],
+  bb_hoch: ["Body Battery Höchstwert", "", 0, ["g.tag.bodyBatteryHighestValue", "g.bodybattery.highBB"]],
+  bb_tief: ["Body Battery Tiefstwert", "", 0, ["g.tag.bodyBatteryLowestValue", "g.bodybattery.lowBB"]],
+  bb_aktuell: ["Body Battery zuletzt", "", 0, ["g.tag.bodyBatteryMostRecentValue"]],
+  etagen: ["Etagen hinauf", "", 0, ["g.tag.floorsAscended", "g.etagen.floorsAscended"]],
+  im_mod: ["Intensitätsminuten mäßig", "Min.", 0, ["g.tag.moderateIntensityMinutes", "g.intensitaet.moderateValue"]],
+  im_int: ["Intensitätsminuten hoch", "Min.", 0, ["g.tag.vigorousIntensityMinutes", "g.intensitaet.vigorousValue"]],
+  aktivkcal: ["Aktivkalorien", "kcal", 0, ["g.tag.activeKilocalories", "g.kalorien.active", "w.aktivitaet.calories"]],
+  schlaf_dauer: ["Schlafdauer", "Std.", 1, [["g.schlaf.totalSleepTimeInSeconds", (v) => v / 3600], ["w.schlaf.total_sleep_time", (v) => v / 3600], ["g.tag.sleepingSeconds", (v) => v / 3600]]],
+  schlaf_tief: ["Tiefschlaf", "Std.", 1, [["g.schlaf.deepTime", (v) => v / 3600], ["w.schlaf.deepsleepduration", (v) => v / 3600]]],
+  schlaf_leicht: ["Leichtschlaf", "Std.", 1, [["g.schlaf.lightTime", (v) => v / 3600], ["w.schlaf.lightsleepduration", (v) => v / 3600]]],
+  schlaf_rem: ["REM-Schlaf", "Std.", 1, [["g.schlaf.remTime", (v) => v / 3600], ["w.schlaf.remsleepduration", (v) => v / 3600]]],
+  schlaf_wach: ["Wach", "Std.", 1, [["g.schlaf.awakeTime", (v) => v / 3600], ["w.schlaf.wakeupduration", (v) => v / 3600]]],
+  schlaf_score: ["Schlafscore", "", 0, ["g.schlaf.sleepScore", "w.schlaf.sleep_score"]],
+  schlaf_bedarf: ["Schlafbedarf", "Std.", 1, [["g.schlaf.sleepNeed", (v) => v / 60]]],
+  schlaf_atem: ["Atemfrequenz im Schlaf", "/min", 1, ["g.schlaf.respiration", "g.atmung.avgSleepRespiration", "w.schlaf.rr_average"]],
+  schlaf_spo2: ["SpO₂ im Schlaf", "%", 0, ["g.schlaf.spO2"]],
+  schlaf_haut: ["Hauttemperatur (Abweichung)", "°C", 1, ["g.schlaf.skinTempC"]],
+  schlaf_bb: ["Body Battery im Schlaf aufgeladen", "", 0, ["g.schlaf.bodyBatteryChange"]],
+  hrv: ["HRV letzte Nacht", "ms", 0, ["g.hrv.lastNightAvg"]],
+  hrv_woche: ["HRV 7-Tage-Mittel", "ms", 0, ["g.hrv.weeklyAvg"]],
+  hrv_unten: ["HRV-Normalbereich unten", "ms", 0, ["g.hrv.baseline.balancedLow"]],
+  hrv_oben: ["HRV-Normalbereich oben", "ms", 0, ["g.hrv.baseline.balancedUpper"]],
+  bereitschaft: ["Trainingsbereitschaft", "", 0, ["g.bereitschaft.score"]],
+  vo2lauf: ["VO₂max Laufen", "", 1, ["g.vo2max.generic.vo2MaxPreciseValue", "g.vo2max.generic.vo2MaxValue"]],
+  vo2rad: ["VO₂max Radfahren", "", 1, ["g.vo2max.cycling.vo2MaxPreciseValue", "g.vo2max.cycling.vo2MaxValue"]],
+  fitnessalter: ["Fitnessalter", "Jahre", 1, ["g.fitnessalter.fitnessAge"]],
+  last_akut: ["Akute Last", "", 0, ["g.trainingsstatus.acuteTrainingLoadDTO.dailyTrainingLoadAcute"]],
+  last_chronisch: ["Chronische Last", "", 0, ["g.trainingsstatus.acuteTrainingLoadDTO.dailyTrainingLoadChronic"]],
+  wochenlast: ["Wochenlast", "", 0, ["g.trainingsstatus.weeklyTrainingLoad"]],
+  p5k: ["5 km", "", 0, ["g.wettkampf.time5K"]], p10k: ["10 km", "", 0, ["g.wettkampf.time10K"]],
+  phm: ["Halbmarathon", "", 0, ["g.wettkampf.timeHalfMarathon"]], pm: ["Marathon", "", 0, ["g.wettkampf.timeMarathon"]],
+  ausdauer: ["Ausdauerwert", "", 0, ["g.ausdauer.overallScore", "g.ausdauer.groupAverage"]],
+  huegel: ["Hill Score", "", 0, ["g.huegel.overallScore"]],
+  trinken: ["Getrunken", "ml", 0, ["g.trinken.valueInML"]],
+  atem_wach: ["Atemfrequenz wach", "/min", 1, ["g.tag.avgWakingRespirationValue", "g.atmung.avgWakingRespiration"]],
+  spo2: ["SpO₂ im Tagesmittel", "%", 0, ["g.tag.averageSpo2"]],
+};
+async function kennzahl(id, von = null, bis = null) {
+  const def = K[id];
+  if (!def) return [];
+  const nachDatum = new Map();
+  for (const q of def[3]) {
+    const [m, f] = Array.isArray(q) ? q : [q, null];
+    for (const [d, v] of await Daten.reihe(m, von, bis)) if (!nachDatum.has(d)) nachDatum.set(d, f ? f(v) : v);
+  }
+  return [...nachDatum.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+}
+async function kennzahlen(ids, von, bis) {
+  const werte = await Promise.all(ids.map((id) => kennzahl(id, von, bis)));
+  return Object.fromEntries(ids.map((id, i) => [id, werte[i]]));
+}
+const letzter = (r) => (r && r.length ? r[r.length - 1] : null);
+function amTag(r, iso) { const p = (r || []).find((x) => x[0] === iso); return p ? p[1] : null; }
+function vorTagen(r, tage, basis) {
+  // Wert, der am naechsten an "basis - tage" liegt (hoechstens 7 Tage daneben)
+  if (!r || !r.length) return null;
+  const ziel = typeof basis === "number" ? basis - tage * 86400000 : tagMs(isoMinus(tage));
+  let best = null, abstand = Infinity;
+  for (const p of r) {
+    const t = typeof p[0] === "number" ? p[0] : tagMs(p[0]);
+    const a = Math.abs(t - ziel);
+    if (a < abstand) { abstand = a; best = p; }
+  }
+  return abstand <= 7 * 86400000 ? best[1] : null;
+}
+
+const TEXTE = {
+  BALANCED: "ausgeglichen", UNBALANCED: "unausgeglichen", LOW: "niedrig", POOR: "schlecht", NONE: "keine Angabe",
+  HIGH: "hoch", MODERATE: "mäßig", PRIME: "optimal", EXCELLENT: "ausgezeichnet", GOOD: "gut", FAIR: "mittel",
+  CALM: "ruhig", STRESSFUL: "stressig", VERY_STRESSFUL: "sehr stressig", OPTIMAL: "optimal", VERY_HIGH: "sehr hoch",
+  NO_STATUS: "kein Status",
+};
+function textDeutsch(t) {
+  if (!t) return "";
+  if (TEXTE[t]) return TEXTE[t];
+  const stamm = String(t).replace(/_\d+$/, "");
+  const status = { PRODUCTIVE: "produktiv", MAINTAINING: "Leistung halten", RECOVERY: "Erholung", UNPRODUCTIVE: "unproduktiv",
+    DETRAINING: "Leistungsabbau", OVERREACHING: "Überlastung", PEAKING: "Höchstform", STRAINED: "überfordert",
+    HRV_BALANCED: "ausgeglichen", HRV_UNBALANCED: "unausgeglichen", HRV_LOW: "niedrig", HRV_POOR: "schlecht" }[stamm];
+  return status || String(t).toLowerCase().replace(/_/g, " ");
+}
+
+// Bezeichnungen fuer "Alle Werte"
+const BEREICH_NAMEN = {
+  "g.tag": "Garmin – Tag", "g.schlaf": "Garmin – Schlaf", "g.hrv": "Garmin – HRV", "g.bereitschaft": "Garmin – Trainingsbereitschaft",
+  "g.vo2max": "Garmin – VO₂max", "g.fitnessalter": "Garmin – Fitnessalter", "g.atmung": "Garmin – Atmung", "g.trinken": "Garmin – Trinken",
+  "g.snapshot": "Garmin – Health Snapshot", "g.ausdauer": "Garmin – Ausdauerwert", "g.huegel": "Garmin – Hill Score",
+  "g.akklimatisierung": "Garmin – Akklimatisierung", "g.gewicht": "Garmin – Gewicht", "g.blutdruck": "Garmin – Blutdruck",
+  "g.zyklus": "Garmin – Zyklus", "g.wettkampf": "Garmin – Wettkampfprognose", "g.trainingsstatus": "Garmin – Trainingsstatus",
+  "g.laufbelastung": "Garmin – Laufbelastung", "g.schritte": "Garmin – Schritte", "g.herz": "Garmin – Herzfrequenz",
+  "g.stress": "Garmin – Stress", "g.bodybattery": "Garmin – Body Battery", "g.intensitaet": "Garmin – Intensitätsminuten",
+  "g.etagen": "Garmin – Etagen", "g.kalorien": "Garmin – Kalorien", "w.aktivitaet": "Withings – Aktivität", "w.schlaf": "Withings – Schlaf",
+};
+const FELD_NAMEN = {
+  totalSteps: "Schritte", dailyStepGoal: "Schrittziel", totalDistanceMeters: "Strecke (m)", activeKilocalories: "Aktivkalorien",
+  bmrKilocalories: "Grundumsatz (kcal)", totalKilocalories: "Kalorien gesamt", wellnessActiveKilocalories: "Aktivkalorien (Alltag)",
+  restingHeartRate: "Ruhepuls", minHeartRate: "Puls minimal", maxHeartRate: "Puls maximal", lastSevenDaysAvgRestingHeartRate: "Ruhepuls 7-Tage-Mittel",
+  averageStressLevel: "Stress im Mittel", maxStressLevel: "Stress maximal", stressDuration: "Stressdauer (s)", restStressDuration: "Ruhedauer (s)",
+  lowStressDuration: "Geringer Stress (s)", mediumStressDuration: "Mittlerer Stress (s)", highStressDuration: "Hoher Stress (s)",
+  bodyBatteryHighestValue: "Body Battery Höchstwert", bodyBatteryLowestValue: "Body Battery Tiefstwert", bodyBatteryChargedValue: "Body Battery aufgeladen",
+  bodyBatteryDrainedValue: "Body Battery verbraucht", bodyBatteryAtWakeTime: "Body Battery beim Aufwachen", bodyBatteryMostRecentValue: "Body Battery zuletzt",
+  floorsAscended: "Etagen hinauf", floorsDescended: "Etagen hinab", userFloorsAscendedGoal: "Etagenziel",
+  moderateIntensityMinutes: "Intensitätsminuten mäßig", vigorousIntensityMinutes: "Intensitätsminuten hoch", intensityMinutesGoal: "Ziel Intensitätsminuten",
+  sleepingSeconds: "Schlaf (s)", activeSeconds: "Aktiv (s)", highlyActiveSeconds: "Sehr aktiv (s)", sedentarySeconds: "Inaktiv (s)",
+  averageSpo2: "SpO₂ Mittel", lowestSpo2: "SpO₂ Tiefstwert", latestSpo2: "SpO₂ zuletzt", avgWakingRespirationValue: "Atemfrequenz wach",
+  highestRespirationValue: "Atemfrequenz Höchstwert", lowestRespirationValue: "Atemfrequenz Tiefstwert",
+  totalSleepTimeInSeconds: "Schlafdauer (s)", deepTime: "Tiefschlaf (s)", lightTime: "Leichtschlaf (s)", remTime: "REM (s)", awakeTime: "Wach (s)",
+  sleepScore: "Schlafscore", respiration: "Atemfrequenz", spO2: "SpO₂", sleepNeed: "Schlafbedarf (Min.)", skinTempC: "Hauttemperatur-Abweichung (°C)",
+  bodyBatteryChange: "Body Battery aufgeladen", lastNightAvg: "HRV letzte Nacht", weeklyAvg: "HRV 7-Tage-Mittel", lastNight5MinHigh: "HRV 5-Minuten-Höchstwert",
+  "baseline.balancedLow": "Normalbereich unten", "baseline.balancedUpper": "Normalbereich oben", "baseline.lowUpper": "Grenze niedrig", "baseline.markerValue": "Lage im Bereich",
+  score: "Wert", recoveryTime: "Erholungszeit (Min.)", acwrFactorPercent: "Faktor Lastverhältnis (%)", hrvFactorPercent: "Faktor HRV (%)",
+  sleepHistoryFactorPercent: "Faktor Schlafverlauf (%)", stressHistoryFactorPercent: "Faktor Stressverlauf (%)",
+  "generic.vo2MaxPreciseValue": "Laufen (genau)", "generic.vo2MaxValue": "Laufen", "cycling.vo2MaxPreciseValue": "Radfahren (genau)", "cycling.vo2MaxValue": "Radfahren",
+  fitnessAge: "Fitnessalter", chronologicalAge: "Lebensalter", achievableFitnessAge: "Erreichbares Fitnessalter", rhr: "Ruhepuls",
+  avgWakingRespiration: "Wach", avgSleepRespiration: "Im Schlaf", goalInML: "Trinkziel (ml)", valueInML: "Getrunken (ml)", sweatLossInML: "Schweißverlust (ml)",
+  groupAverage: "Ausdauerwert", groupMax: "Ausdauerwert Höchstwert", overallScore: "Gesamt", strengthScore: "Kraft", enduranceScore: "Ausdauer",
+  heatAcclimationPercentage: "Hitzeakklimatisierung (%)", altitudeAcclimation: "Höhenakklimatisierung", currentAltitude: "Aktuelle Höhe (m)",
+  weight: "Gewicht (g)", bmi: "BMI", time5K: "5 km (s)", time10K: "10 km (s)", timeHalfMarathon: "Halbmarathon (s)", timeMarathon: "Marathon (s)",
+  trainingStatus: "Status-Code", weeklyTrainingLoad: "Wochenlast", "acuteTrainingLoadDTO.acwrPercent": "Lastverhältnis (%)",
+  "acuteTrainingLoadDTO.dailyTrainingLoadAcute": "Akute Last", "acuteTrainingLoadDTO.dailyTrainingLoadChronic": "Chronische Last",
+  steps: "Schritte", distance: "Strecke (m)", calories: "Kalorien", totalcalories: "Kalorien gesamt", elevation: "Höhenmeter",
+  soft: "Leicht aktiv (s)", moderate: "Mäßig aktiv (s)", intense: "Intensiv (s)", active: "Aktiv (s)",
+  hr_average: "Puls Mittel", hr_min: "Puls minimal", hr_max: "Puls maximal", sleep_score: "Schlafscore", total_sleep_time: "Schlafdauer (s)",
+};
+function metrikName(m) {
+  if (m.startsWith("w.mess.")) {
+    const [, , typ, pos] = m.split(".");
+    return wName(+typ, pos == null ? -1 : +pos);
+  }
+  const teile = m.split(".");
+  const feld = teile.slice(2).join(".");
+  if (FELD_NAMEN[feld]) return FELD_NAMEN[feld];
+  const letztes = teile[teile.length - 1];
+  if (FELD_NAMEN[letztes]) return FELD_NAMEN[letztes];
+  return feld.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[._]/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+}
+function bereichName(m) {
+  if (m.startsWith("w.mess.")) return "Withings – Messungen";
+  const p = m.split(".").slice(0, 2).join(".");
+  return BEREICH_NAMEN[p] || p;
+}
+
+// ---- Sportarten
+const SPORT = {
+  running: ["Laufen", "lauf"], trail_running: ["Trailrunning", "lauf"], treadmill_running: ["Laufband", "lauf"],
+  track_running: ["Bahnlauf", "lauf"], indoor_running: ["Laufen (drinnen)", "lauf"], virtual_run: ["Virtueller Lauf", "lauf"],
+  cycling: ["Radfahren", "fahrrad"], road_biking: ["Rennrad", "fahrrad"], mountain_biking: ["Mountainbike", "fahrrad"],
+  gravel_cycling: ["Gravel", "fahrrad"], indoor_cycling: ["Indoor-Radfahren", "fahrrad"], virtual_ride: ["Virtuelle Radfahrt", "fahrrad"],
+  e_bike_fitness: ["E-Bike", "fahrrad"], e_bike_mountain: ["E-Mountainbike", "fahrrad"], cyclocross: ["Cyclocross", "fahrrad"],
+  walking: ["Gehen", "gehen"], casual_walking: ["Spazieren", "gehen"], speed_walking: ["Schnelles Gehen", "gehen"], indoor_walking: ["Gehen (drinnen)", "gehen"],
+  hiking: ["Wandern", "wandern"], mountaineering: ["Bergsteigen", "wandern"], snowshoeing_ws: ["Schneeschuh", "wandern"],
+  strength_training: ["Krafttraining", "kraft"], indoor_cardio: ["Cardio", "kraft"], cardio_training: ["Cardio", "kraft"], hiit: ["HIIT", "kraft"],
+  fitness_equipment: ["Fitnessgeräte", "kraft"], elliptical: ["Crosstrainer", "kraft"], stair_climbing: ["Treppensteigen", "kraft"],
+  indoor_rowing: ["Rudergerät", "kraft"], rowing: ["Rudern", "schwimmen"], yoga: ["Yoga", "yoga"], pilates: ["Pilates", "yoga"],
+  breathwork: ["Atemübung", "yoga"], meditation: ["Meditation", "yoga"], swimming: ["Schwimmen", "schwimmen"], lap_swimming: ["Bahnenschwimmen", "schwimmen"],
+  open_water_swimming: ["Freiwasserschwimmen", "schwimmen"], resort_skiing_snowboarding_ws: ["Ski & Snowboard", "wandern"],
+  backcountry_skiing: ["Skitour", "wandern"], cross_country_skiing_ws: ["Langlauf", "wandern"], multi_sport: ["Multisport", "sonst"],
+  tennis: ["Tennis", "sonst"], padel: ["Padel", "sonst"], golf: ["Golf", "sonst"], other: ["Sonstiges", "sonst"],
+};
+function sportName(typ) { return (SPORT[typ] || [String(typ || "Sonstiges").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())])[0]; }
+function sportIcon(typ) { return (SPORT[typ] || [0, "sonst"])[1]; }
+function istLauf(typ) { return sportIcon(typ) === "lauf"; }
+
+// ---- Blutdruck nach ESH
+function bpKlasse(sys, dia) {
+  if (sys >= 180 || dia >= 110) return ["Grad 3", "kritisch"];
+  if (sys >= 160 || dia >= 100) return ["Grad 2", "kritisch"];
+  if (sys >= 140 || dia >= 90) return ["Grad 1", "ernst"];
+  if (sys >= 130 || dia >= 85) return ["hoch-normal", "warnung"];
+  if (sys >= 120 || dia >= 80) return ["normal", "gut"];
+  return ["optimal", "gut"];
+}
+function chip(text, art = "neutral") { return h("span", { class: `chip ${art}` }, text); }
+const AFIB = { 0: ["Kein Vorhofflimmern", "gut"], 1: ["Vorhofflimmern erkannt", "kritisch"], 2: ["Nicht eindeutig", "warnung"] };
+
+// ======================================================================
+// Diagramme (ECharts)
+// ======================================================================
+const DIAGRAMME = new Set();
+const NACH = [];
+const groesse = new ResizeObserver((eintraege) => {
+  for (const e of eintraege) { const c = window.echarts && echarts.getInstanceByDom(e.target); if (c) c.resize(); }
+});
+function diagrammeAufraeumen() {
+  for (const c of DIAGRAMME) { try { groesse.unobserve(c.getDom()); c.dispose(); } catch { /* schon weg */ } }
+  DIAGRAMME.clear();
+}
+function farbe(slot) {
+  if (typeof slot === "string") return slot.startsWith("--") ? css(slot) : slot;
+  return css(`--serie-${slot || 1}`);
+}
+function textStil(extra = {}) { return { color: css("--tinte-3"), fontFamily: SCHRIFT, fontSize: 12, ...extra }; }
+function zeitFormat(spanneTage) {
+  return (v) => {
+    const d = new Date(v);
+    if (spanneTage <= 2) return DF.zeit.format(d);
+    if (spanneTage <= 150) return spanneTage > 20 && d.getDate() >= 27 ? "" : `${d.getDate()}.${d.getMonth() + 1}.`; // kein 29. direkt vor dem 1.
+    return DF.monatKurz.format(d);
+  };
+}
+/** Achsenbeschriftung mit so wenigen Nachkommastellen wie nötig */
+function achsenZahl(v) {
+  const st = Math.abs(v - Math.round(v)) < 1e-6 ? 0 : Math.abs(v * 10 - Math.round(v * 10)) < 1e-6 ? 1 : 2;
+  return zahl(v, st);
+}
+function tooltipStil() {
+  return {
+    backgroundColor: css("--blatt"), borderColor: css("--linie-stark"), borderWidth: 1, padding: [8, 10],
+    textStyle: { color: css("--tinte"), fontFamily: SCHRIFT, fontSize: 13 },
+    extraCssText: "border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.12);", confine: true,
+  };
+}
+function tooltipZeile(farbe_, wert, name) {
+  return `<div style="display:flex;align-items:center;gap:8px;margin-top:3px"><i style="display:inline-block;width:12px;height:3px;border-radius:2px;background:${farbe_}"></i><b style="font-weight:650">${esc(wert)}</b><span style="color:${css("--tinte-2")}">${esc(name)}</span></div>`;
+}
+function xWert(x) { return typeof x === "string" ? tagMs(x) : x; }
+
+/** Liniendiagramm / Balken auf Zeitachse.
+ *  serien: [{name, daten:[[x,y]], slot, art:'linie'|'balken'|'punkte', stellen, einheit, stapel, gestrichelt, endWert, format}] */
+function zeitDiagramm(div, serien, opt = {}) {
+  const alle = serien.flatMap((s_) => s_.daten.map((p) => xWert(p[0])));
+  const min = Math.min(...alle), max = Math.max(...alle);
+  const spanne = Number.isFinite(min) ? (max - min) / 86400000 : 30;
+  const linie = css("--linie"), stark = css("--linie-stark");
+  const flaechenFarbe = css("--blatt");
+  const option = {
+    animation: BEWEGUNG, animationDuration: 380,
+    grid: { left: 4, right: opt.rechts ?? 44, top: opt.oben ?? 14, bottom: 4, containLabel: true },
+    xAxis: {
+      type: "time", min: opt.xMin, max: opt.xMax, splitNumber: (opt.spanne ?? spanne) <= 2 ? 5 : 4,
+      axisLine: { lineStyle: { color: stark } }, axisTick: { show: false },
+      axisLabel: { ...textStil(), hideOverlap: true, showMaxLabel: false, formatter: zeitFormat(opt.spanne ?? spanne) },
+      splitLine: { show: false }, axisPointer: { show: true, type: "line", lineStyle: { color: css("--tinte-3"), width: 1 }, label: { show: false } },
+    },
+    yAxis: {
+      type: "value", scale: opt.nullBasis ? false : true, min: opt.yMin, max: opt.yMax, interval: opt.yIntervall, inverse: Boolean(opt.umgekehrt),
+      splitNumber: 4, axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { ...textStil(), formatter: opt.yFormat || achsenZahl },
+      splitLine: { lineStyle: { color: linie, width: 1 } },
+    },
+    tooltip: {
+      trigger: "axis", ...tooltipStil(),
+      formatter: (params) => {
+        if (!params.length) return "";
+        const x = params[0].value[0];
+        const kopf = opt.wochen ? `Woche ab ${DF.langJahr.format(new Date(x))}` : opt.mitUhrzeit ? DF.datumZeit.format(new Date(x)) : DF.langJahr.format(new Date(x));
+        let html = `<div style="color:${css("--tinte-2")};font-size:12px">${esc(kopf)}</div>`;
+        for (const p of params) {
+          const se = serien[p.seriesIndex];
+          if (!se || se.unsichtbar || p.value[1] == null) continue;
+          const wert = se.format ? se.format(p.value[1], p.value) : `${zahl(p.value[1], se.stellen ?? 0)}${se.einheit ? " " + se.einheit : ""}`;
+          html += tooltipZeile(farbe(se.slot), wert, se.name);
+        }
+        if (opt.tooltipExtra) html += opt.tooltipExtra(params);
+        return html;
+      },
+    },
+    series: serien.map((se) => {
+      const c = farbe(se.slot);
+      const daten = se.daten.map((p) => [xWert(p[0]), p[1], ...(p.slice(2))]);
+      if (se.art === "balken") {
+        const luecke = se.stapel && daten.length <= 40; // 2-px-Lücke nur, wenn die Balken breit genug sind
+        return {
+          name: se.name, type: "bar", data: daten, stack: se.stapel, barMaxWidth: 24, barMinWidth: 1, barGap: "10%",
+          itemStyle: { color: c, borderRadius: se.rund === false || daten.length > 60 ? 0 : (se.stapel && !se.oben ? 0 : [4, 4, 0, 0]), borderColor: luecke ? flaechenFarbe : undefined, borderWidth: luecke ? 1 : 0 },
+          emphasis: { itemStyle: { opacity: 0.85 } },
+          markLine: se.markLine,
+        };
+      }
+      const punkte = se.art === "punkte" || (se.punkte ?? daten.length <= 45);
+      return {
+        name: se.name, type: "line", data: daten, stack: se.stapel, smooth: false, connectNulls: Boolean(se.verbinden),
+        showSymbol: punkte, symbol: "circle", symbolSize: se.art === "punkte" ? 7 : 6,
+        lineStyle: { width: se.unsichtbar ? 0 : se.art === "punkte" ? 0 : 2, color: c, type: se.gestrichelt ? "dashed" : "solid", cap: "round", join: "round" },
+        itemStyle: { color: c, borderColor: flaechenFarbe, borderWidth: 2 },
+        areaStyle: se.flaeche ? { color: se.flaecheFarbe || c, opacity: se.flaecheDeckkraft ?? 0.1 } : undefined,
+        emphasis: { disabled: true }, silent: Boolean(se.unsichtbar), z: se.z ?? 2,
+        endLabel: se.endWert ? {
+          show: true, distance: 6, color: css("--tinte"), fontFamily: SCHRIFT, fontSize: 12, fontWeight: 650,
+          formatter: (p) => (se.endFormat ? se.endFormat(p.value[1]) : se.format ? se.format(p.value[1], p.value) : zahl(p.value[1], se.stellen ?? 0)),
+        } : undefined,
+        markLine: se.markLine,
+      };
+    }),
+  };
+  if (opt.referenzen && opt.referenzen.length) {
+    option.series.push({
+      type: "line", data: [], silent: true,
+      markLine: {
+        silent: true, symbol: "none", animation: false,
+        lineStyle: { color: css("--tinte-3"), type: "dashed", width: 1 },
+        label: { color: css("--tinte-2"), fontFamily: SCHRIFT, fontSize: 11, position: "insideStartTop", formatter: (p) => p.name,
+          backgroundColor: css("--blatt"), padding: [1, 4], borderRadius: 3 },
+        data: opt.referenzen.map((r) => ({ yAxis: r.wert, name: r.text })),
+      },
+    });
+  }
+  return neuesDiagramm(div, option);
+}
+function neuesDiagramm(div, option) {
+  if (!window.echarts) { div.textContent = "Diagramme konnten nicht geladen werden."; return null; }
+  const c = echarts.init(div, null, { renderer: "canvas" });
+  c.setOption(option);
+  DIAGRAMME.add(c);
+  groesse.observe(div);
+  return c;
+}
+
+/** Diagramm mit Überschrift, Legende und Tabellenansicht */
+function figur({ titel, wert, serien, opt = {}, hoehe = "", legende, fussnote, tabelle, zeichnen }) {
+  const flaeche = h("div", { class: `flaeche ${hoehe}`, role: "img", "aria-label": titel || "Diagramm" });
+  const knopf = h("button", { class: "tabellen-knopf", type: "button" }, "Als Tabelle zeigen");
+  const rahmen = h("div", { class: "tabellen-rahmen", hidden: true });
+  knopf.addEventListener("click", () => {
+    if (rahmen.hidden) {
+      if (!rahmen.firstChild) rahmen.append(tabelle ? tabelle() : serienTabelle(serien, opt));
+      rahmen.hidden = false; knopf.textContent = "Tabelle ausblenden";
+    } else { rahmen.hidden = true; knopf.textContent = "Als Tabelle zeigen"; }
+  });
+  const sichtbar = (serien || []).filter((x) => !x.unsichtbar && !x.ohneLegende);
+  const leg = legende || (sichtbar.length >= 2 ? h("div", { class: "legende" }, sichtbar.map((x) =>
+    h("span", null, h("i", { class: x.art === "balken" ? "kasten" : x.art === "punkte" ? "punkt" : x.gestrichelt ? "gestrichelt" : "", style: { background: farbe(x.slot) } }), x.name))) : null);
+  const f = h("figure", { class: "diagramm" },
+    titel || wert ? h("div", { class: "diagramm-kopf" }, h("h3", null, titel || ""), wert ? h("div", { class: "wert" }, wert) : null) : null,
+    leg, flaeche,
+    h("figcaption", null, h("span", null, fussnote || ""), knopf), rahmen);
+  NACH.push(() => (zeichnen ? zeichnen(flaeche) : zeitDiagramm(flaeche, serien, opt)));
+  return f;
+}
+/** Ein Diagramm mit Auswahl-Chips darüber (statt vieler kleiner Diagramme untereinander) */
+function auswahlFigur(name, optionen, hoehe = "") {
+  if (!optionen.length) return null;
+  let aktiv = optionen[0].id;
+  const chipsBox = h("div", { class: "chips", role: "group", "aria-label": name });
+  const box = h("div", { style: { marginTop: "12px" } });
+  const zeige = () => {
+    chipsBox.replaceChildren(...optionen.map((o) => h("button", { type: "button", "aria-pressed": String(o.id === aktiv), onclick: () => { aktiv = o.id; zeige(); } }, o.name)));
+    const alt = box.querySelector(".flaeche");
+    if (alt && window.echarts) { const c = echarts.getInstanceByDom(alt); if (c) { DIAGRAMME.delete(c); groesse.unobserve(alt); c.dispose(); } }
+    const o = optionen.find((x) => x.id === aktiv);
+    const vorher = NACH.length;
+    box.replaceChildren(figur({ titel: o.name, wert: o.wert, serien: o.serien, opt: o.opt || {}, hoehe, fussnote: o.fussnote }));
+    if (box.isConnected) {
+      const auftraege = NACH.splice(vorher);
+      requestAnimationFrame(() => auftraege.forEach((f) => f()));
+    }
+  };
+  zeige();
+  return h("div", null, chipsBox, box);
+}
+function serienTabelle(serien, opt = {}) {
+  const sichtbar = serien.filter((x) => !x.unsichtbar);
+  const zeilen = new Map();
+  sichtbar.forEach((se, i) => {
+    for (const p of se.daten) {
+      const k = xWert(p[0]);
+      if (!zeilen.has(k)) zeilen.set(k, []);
+      zeilen.get(k)[i] = p[1];
+    }
+  });
+  const sortiert = [...zeilen.entries()].sort((a, b) => b[0] - a[0]).slice(0, 800);
+  return h("table", { class: "tabelle" },
+    h("thead", null, h("tr", null, h("th", null, opt.wochen ? "Woche ab" : opt.mitUhrzeit ? "Zeitpunkt" : "Datum"), sichtbar.map((se) => h("th", null, se.name + (se.einheit ? ` (${se.einheit})` : ""))))),
+    h("tbody", null, sortiert.map(([x, werte]) => h("tr", null,
+      h("td", null, opt.mitUhrzeit ? DF.datumZeit.format(new Date(x)) : datum(isoAusMs(x), "kurz")),
+      sichtbar.map((se, i) => h("td", null, werte[i] == null ? "–" : se.format ? se.format(werte[i]) : zahl(werte[i], se.stellen ?? 0)))))));
+}
+function funke(punkte, breite = 160, hoehe_ = 30) {
+  const svg = s("svg", { class: "funke", viewBox: `0 0 ${breite} ${hoehe_}`, preserveAspectRatio: "none", "aria-hidden": "true" });
+  const werte = punkte.filter((p) => Number.isFinite(p[1]));
+  if (werte.length < 2) return svg;
+  const xs = werte.map((p) => xWert(p[0])), ys = werte.map((p) => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const sx = (x) => ((x - x0) / (x1 - x0 || 1)) * (breite - 6) + 3;
+  const sy = (y) => hoehe_ - 4 - ((y - y0) / (y1 - y0 || 1)) * (hoehe_ - 8);
+  const d = werte.map((p, i) => `${i ? "L" : "M"}${sx(xs[i]).toFixed(1)},${sy(ys[i]).toFixed(1)}`).join("");
+  svg.append(s("path", { d, fill: "none", stroke: "var(--serie-grau)", "stroke-width": 1.6, "vector-effect": "non-scaling-stroke", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  const lx = sx(xs[xs.length - 1]), ly = sy(ys[ys.length - 1]);
+  svg.append(s("circle", { cx: lx, cy: ly, r: 3.4, fill: "var(--serie-1)", stroke: "var(--blatt)", "stroke-width": 1.5 }));
+  return svg;
+}
+
+// ======================================================================
+// Bausteine
+// ======================================================================
+function abschnitt(titel, beschreibung, ...inhalt) {
+  return h("section", { class: "abschnitt" },
+    h("div", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, titel), beschreibung ? h("p", null, beschreibung) : null)),
+    ...inhalt);
+}
+function kachel({ titel, wert, einheit, unter, link, funkeDaten, extra }) {
+  const inhalt = [
+    h("span", { class: "kachel-titel" }, titel),
+    wert != null ? h("span", { class: "kachel-wert" }, wert, einheit ? h("small", null, einheit) : null) : null,
+    extra || null,
+    h("span", { class: "kachel-unter" }, unter || ""),
+    funkeDaten && funkeDaten.length > 1 ? funke(funkeDaten) : null,
+  ];
+  return link ? h("a", { class: "kachel", href: link }, inhalt) : h("div", { class: "kachel" }, inhalt);
+}
+function werteListe(eintraege) {
+  return h("ul", { class: "werte" }, eintraege.filter(Boolean).map((e) =>
+    h("li", null, h("span", { class: "name" }, e.name), h("span", { class: "zahl" }, e.wert, e.einheit ? h("small", null, e.einheit) : null),
+      e.neben ? h("span", { class: "neben" }, e.neben) : null)));
+}
+function leer(titel, text) { return h("div", { class: "leer" }, h("b", null, titel), text ? h("p", null, text) : null); }
+function hinweis(text, art = "", symbol = "info") {
+  return h("div", { class: `hinweis ${art}` }, icon(symbol), h("div", null, [].concat(text).map((t) => (t instanceof Node ? t : h("p", null, t)))));
+}
+function deltaText(jetzt, frueher, stellen, einheit, wort = "") {
+  if (jetzt == null || frueher == null) return "";
+  const d = jetzt - frueher;
+  if (Math.abs(d) < Math.pow(10, -stellen) / 2) return `unverändert${wort ? " " + wort : ""}`;
+  // Bei Prozentwerten ist die Differenz in Prozentpunkten; "1 Jahr" statt "1 Jahre"
+  let e = einheit === "%" ? "Punkte" : einheit;
+  if (e === "Jahre" && Math.abs(Math.round(d * Math.pow(10, stellen))) === Math.pow(10, stellen)) e = "Jahr";
+  if (e === "Punkte" && Math.abs(Math.round(d * Math.pow(10, stellen))) === Math.pow(10, stellen)) e = "Punkt";
+  return `${vorzeichen(d, stellen)}${e ? " " + e : ""}${wort ? " " + wort : ""}`;
+}
+
+// ---- Zeitraum je Diagramm (wie in den Apps von Withings und Garmin)
+const ZEITRAEUME = [["7", "7 T", "7 Tage"], ["30", "1 M", "1 Monat"], ["91", "3 M", "3 Monate"], ["182", "6 M", "6 Monate"], ["365", "12 M", "12 Monate"]];
+const ZR_ALLE = ["alle", "Alle", "gesamter Zeitraum"];
+const ZR_IN = { 7: "in den letzten 7 Tagen", 30: "im letzten Monat", 91: "in den letzten 3 Monaten", 182: "in den letzten 6 Monaten", 365: "in den letzten 12 Monaten", alle: "bisher" };
+function zrAlle() { try { const o = JSON.parse(speicher.get(S.zeitraum) || "{}"); return o && typeof o === "object" ? o : {}; } catch { return {}; } }
+function zrGewaehlt(id, standard, erlaubt) { const z = zrAlle()[id]; return erlaubt.includes(z) ? z : standard; }
+function zrMerken(id, wert) { const o = zrAlle(); o[id] = wert; speicher.set(S.zeitraum, JSON.stringify(o)); }
+function zrVon(z) { return z === "alle" ? null : isoMinus(+z - 1); }
+function zrWochen(z) { return z === "alle" || +z > 91; }
+function montagIso(iso) { const d = new Date(tagMs(iso)); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoDatum(d); }
+/** Tageswerte oder Einzelmessungen zu Wochenwerten (Woche ab Montag) */
+function nachWochen(daten, art = "mittel") {
+  const m = new Map();
+  for (const p of daten) {
+    if (!Number.isFinite(p[1])) continue;
+    const k = montagIso(typeof p[0] === "number" ? isoAusMs(p[0]) : p[0]);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(p[1]);
+  }
+  return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, l]) => [k, art === "summe" ? l.reduce((a, b) => a + b, 0) : mittel(l)]);
+}
+function imBereich(daten, von) {
+  if (!von) return daten;
+  const ms = tagMs(von);
+  return daten.filter((p) => (typeof p[0] === "number" ? p[0] >= ms : p[0] >= von));
+}
+function statistik(daten, stellen = 0, einheit = "", fmt = null) {
+  const v = daten.map((p) => p[1]).filter(Number.isFinite);
+  if (!v.length) return [];
+  const f = fmt || ((x) => zahl(x, stellen));
+  return [{ name: "Mittel", wert: f(mittel(v)), einheit }, { name: "Tiefst", wert: f(Math.min(...v)), einheit }, { name: "Höchst", wert: f(Math.max(...v)), einheit }];
+}
+function veraenderung(daten, stellen, einheit) {
+  if (daten.length < 2) return null;
+  const d = daten[daten.length - 1][1] - daten[0][1];
+  return { name: "Veränderung", wert: vorzeichen(d, stellen), einheit: einheit === "%" ? "Punkte" : einheit };
+}
+function kennzahlenZeile(liste) {
+  return h("dl", { class: "verlauf-werte" }, liste.filter(Boolean).map((k) =>
+    h("div", null, h("dt", null, k.name), h("dd", null, k.wert, k.einheit ? h("small", null, k.einheit) : null))));
+}
+function diagrammeIn(box) {
+  if (!window.echarts) return;
+  box.querySelectorAll(".flaeche").forEach((el) => { const c = echarts.getInstanceByDom(el); if (c) { DIAGRAMME.delete(c); groesse.unobserve(el); c.dispose(); } });
+}
+/** Verlaufskarte mit eigenem Zeitraum-Umschalter (7 Tage bis 12 Monate), Kennzahlen zum Zeitraum und Tabellenansicht.
+ *  laden({von, tage, wochen, wahl, zr}) liefert {serien, opt, werte, liste, fussnote, tabelle, legende, leerText, unten} */
+async function verlauf({ id, titel = null, auswahl = null, laden, hoehe = "", standard = "30", mitAlle = false }) {
+  const liste = mitAlle ? [...ZEITRAEUME, ZR_ALLE] : ZEITRAEUME;
+  let zr = zrGewaehlt(id, standard, liste.map((x) => x[0]));
+  const ids = auswahl ? auswahl.map((a) => String(a.id)) : [];
+  let wahl = auswahl && auswahl.length ? zrGewaehlt(`${id}.wahl`, ids[0], ids) : null;
+  const seg = h("div", { class: "segmente zr", role: "group", "aria-label": titel ? `Zeitraum für ${titel}` : "Zeitraum" });
+  const chipsBox = auswahl && auswahl.length > 1 ? h("div", { class: "chips", role: "group", "aria-label": titel ? `${titel}: Auswahl` : "Auswahl" }) : null;
+  const inhalt = h("div", { class: "verlauf-inhalt" });
+  const karte = h("div", { class: "verlauf" }, h("div", { class: "verlauf-kopf" }, titel ? h("h3", null, titel) : null, seg), chipsBox, inhalt);
+  let nr = 0;
+  const zeige = async () => {
+    const meins = ++nr;
+    seg.replaceChildren(...liste.map(([z, kurz, lang]) => h("button", { type: "button", "aria-pressed": String(z === zr), "aria-label": lang, title: lang,
+      onclick: () => { if (z !== zr) { zr = z; zrMerken(id, z); zeige(); } } }, kurz)));
+    if (chipsBox) chipsBox.replaceChildren(...auswahl.map((a) => h("button", { type: "button", "aria-pressed": String(String(a.id) === wahl),
+      onclick: () => { if (String(a.id) !== wahl) { wahl = String(a.id); zrMerken(`${id}.wahl`, wahl); zeige(); } } }, a.name)));
+    const von = zrVon(zr);
+    let e;
+    try { e = (await laden({ von, tage: zr === "alle" ? null : +zr, wochen: zrWochen(zr), wahl, zr })) || {}; }
+    catch (fehler) { console.error(fehler); e = { leerText: "Diese Werte konnten nicht geladen werden." }; }
+    if (meins !== nr) return;
+    diagrammeIn(inhalt);
+    const vorher = NACH.length;
+    const hatDaten = (e.serien || []).some((x) => x && !x.unsichtbar && x.daten && x.daten.length);
+    const teile = [];
+    if (hatDaten && e.werte && e.werte.filter(Boolean).length) teile.push(kennzahlenZeile(e.werte));
+    if (hatDaten && e.liste) teile.push(werteListe(e.liste));
+    if (hatDaten) {
+      const serien = e.serien.filter(Boolean);
+      const o = e.opt || {};
+      const halb = 43200000;
+      const xMin = von ? (o.mitUhrzeit ? tagMs(von) : tagMs(o.wochen ? montagIso(von) : von) - halb) : undefined;
+      const xMax = von ? (o.mitUhrzeit ? tagMs(heuteIso()) + 86399999 : tagMs(o.wochen ? montagIso(heuteIso()) : heuteIso()) + halb) : undefined;
+      teile.push(figur({ serien, hoehe, fussnote: e.fussnote, tabelle: e.tabelle, legende: e.legende, opt: { xMin, xMax, spanne: von ? +zr : undefined, ...o } }));
+    } else {
+      teile.push(leer(e.leerText || `Keine Werte ${ZR_IN[zr]}`, zr === "365" || zr === "alle" ? "" : "Wähle oben einen längeren Zeitraum."));
+    }
+    if (e.unten) teile.push(e.unten);
+    inhalt.replaceChildren(...teile.filter(Boolean));
+    if (inhalt.isConnected) {
+      const auftraege = NACH.splice(vorher);
+      requestAnimationFrame(() => auftraege.forEach((f) => { try { f(); } catch (x) { console.error(x); } }));
+    }
+  };
+  karte.neuLaden = zeige;
+  await zeige();
+  return karte;
+}
+
+// ======================================================================
+// Ansicht: Heute
+// ======================================================================
+async function ansichtHeute() {
+  const heute = heuteIso();
+  const von = isoMinus(100);
+  const [w, akt, ekgListe] = await Promise.all([Daten.withings(), Daten.aktivitaeten(), Daten.ekg()]);
+  const k = await kennzahlen(["schritte", "schrittziel", "ruhepuls", "schlaf_dauer", "schlaf_score", "bb_aktuell", "bb_hoch", "hrv",
+    "bereitschaft", "vo2lauf", "stress"], von);
+  const [hrvText, bereitText] = await Promise.all([Daten.texte("g.hrv.status", isoMinus(10)), Daten.texte("g.bereitschaft.level", isoMinus(10))]);
+  const knoten = [];
+
+  // ---- Begrüßung und Lagebericht
+  const stunde = new Date().getHours();
+  const gruss = stunde < 5 ? "Gute Nacht" : stunde < 11 ? "Guten Morgen" : stunde < 17 ? "Guten Tag" : stunde < 23 ? "Guten Abend" : "Gute Nacht";
+  knoten.push(h("p", { class: "begruessung" }, `${gruss}. Heute ist ${datum(heute, "lang")}.`));
+  const brief = h("p", { class: "brief" });
+  const satz = (...teile) => { if (brief.childNodes.length) brief.append(" "); teile.flat(3).forEach((t) => brief.append(t)); };
+  const fett = (t) => h("strong", null, t);
+  const schlafH = amTag(k.schlaf_dauer, heute);
+  if (schlafH != null) {
+    const score = amTag(k.schlaf_score, heute);
+    satz("Letzte Nacht hast du ", fett(dauer(schlafH * 3600)), " geschlafen", score != null ? [", Schlafscore ", fett(zahl(score))] : [], ".");
+  }
+  const bp = blutdruckMessungen(w);
+  const bpLetzte = bp[bp.length - 1];
+  if (bpLetzte && Date.now() - bpLetzte.ts < 3 * 86400000) {
+    const [klasse] = bpKlasse(bpLetzte.sys, bpLetzte.dia);
+    const tag = isoAusMs(bpLetzte.ts);
+    const stundeBp = new Date(bpLetzte.ts).getHours();
+    const tageszeit = istMorgens(bpLetzte.ts) ? "früh" : stundeBp >= 17 ? "Abend" : "Nachmittag";
+    const wann = tag === heute ? `Heute ${tageszeit}` : tag === isoMinus(1) ? `Gestern ${tageszeit}` : `Am ${datum(tag, "wochentag")}`;
+    satz(`${wann} lag dein Blutdruck bei `, fett(`${zahl(bpLetzte.sys)}/${zahl(bpLetzte.dia)}`), " (", h("span", { class: "einstufung" }, klasse), ").");
+  }
+  const gew = wReihe(w, 1);
+  const gLetzt = letzter(gew);
+  if (gLetzt && Date.now() - gLetzt[0] < 4 * 86400000) {
+    const vorher = vorTagen(gew, 30, gLetzt[0]);
+    let vergleich = "";
+    if (vorher != null) {
+      const d = gLetzt[1] - vorher;
+      vergleich = Math.abs(d) < 0.05 ? " – so viel wie vor einem Monat" : `, ${zahl(Math.abs(d), 1)} kg ${d < 0 ? "weniger" : "mehr"} als vor einem Monat`;
+    }
+    satz("Gewicht ", fett(`${zahl(gLetzt[1], 1)} kg`), vergleich, ".");
+  }
+  const bbJetzt = amTag(k.bb_aktuell, heute), schritteHeute = amTag(k.schritte, heute);
+  if (bbJetzt != null || schritteHeute != null) {
+    satz(bbJetzt != null ? ["Body Battery ", fett(zahl(bbJetzt))] : [], bbJetzt != null && schritteHeute != null ? ", bisher " : schritteHeute != null ? "Bisher " : "",
+      schritteHeute != null ? [fett(zahl(schritteHeute)), " Schritte"] : [], ".");
+  }
+  if (!brief.childNodes.length) brief.append("Für heute sind noch keine neuen Werte da. Sobald deine Uhr, die Waage oder das Blutdruckmessgerät synchronisiert haben, erscheinen sie hier.");
+  knoten.push(brief);
+
+  // ---- Kacheln
+  const kacheln = [];
+  if (bp.length) {
+    const woche = bp.filter((m) => m.ts >= Date.now() - 7 * 86400000);
+    const mo = woche.filter((m) => istMorgens(m.ts)), ab = woche.filter((m) => !istMorgens(m.ts));
+    const fmt = (l) => (l.length ? `${zahl(mittel(l.map((m) => m.sys)))}/${zahl(mittel(l.map((m) => m.dia)))}` : "–");
+    const alle7 = woche.length ? [mittel(woche.map((m) => m.sys)), mittel(woche.map((m) => m.dia))] : null;
+    kacheln.push(kachel({
+      titel: "Blutdruck, Mittel 7 Tage", link: "#herz",
+      extra: h("div", { class: "paar" }, h("div", null, h("span", null, "Morgens"), h("b", null, fmt(mo))), h("div", null, h("span", null, "Abends"), h("b", null, fmt(ab)))),
+      unter: alle7 ? (alle7[0] >= 135 || alle7[1] >= 85 ? chip("über 135/85", "ernst") : chip("unter 135/85", "gut")) : "keine Messung in 7 Tagen",
+    }));
+  }
+  if (gLetzt) {
+    const t = wTaeglich(gew).filter((p) => p[0] >= isoMinus(90));
+    kacheln.push(kachel({ titel: "Gewicht", wert: zahl(gLetzt[1], 1), einheit: "kg", link: "#koerper", funkeDaten: t,
+      unter: deltaText(gLetzt[1], vorTagen(gew, 30, gLetzt[0]), 1, "kg", "in 30 Tagen") }));
+  }
+  const fett6 = wReihe(w, 6);
+  if (fett6.length) {
+    const l = letzter(fett6);
+    kacheln.push(kachel({ titel: "Körperfett", wert: zahl(l[1], 1), einheit: "%", link: "#koerper", funkeDaten: wTaeglich(fett6).filter((p) => p[0] >= isoMinus(90)),
+      unter: deltaText(l[1], vorTagen(fett6, 30, l[0]), 1, "Punkte", "in 30 Tagen") }));
+  }
+  const sd = letzter(k.schlaf_dauer);
+  if (sd) {
+    const score = amTag(k.schlaf_score, sd[0]);
+    kacheln.push(kachel({ titel: sd[0] === heute ? "Schlaf letzte Nacht" : `Schlaf ${datum(sd[0], "wochentag")}`, wert: dauer(sd[1] * 3600, false), einheit: "Std.", link: "#schlaf",
+      unter: score != null ? `Schlafscore ${zahl(score)}` : "", funkeDaten: k.schlaf_dauer.filter((p) => p[0] >= isoMinus(30)) }));
+  }
+  const rp = letzter(k.ruhepuls);
+  if (rp) {
+    const m30 = mittel(k.ruhepuls.filter((p) => p[0] >= isoMinus(30)).map((p) => p[1]));
+    kacheln.push(kachel({ titel: "Ruhepuls", wert: zahl(rp[1]), einheit: "bpm", link: "#herz", funkeDaten: k.ruhepuls.filter((p) => p[0] >= isoMinus(30)),
+      unter: m30 != null ? `Mittel 30 Tage ${zahl(m30)}` : "" }));
+  }
+  const hrv = letzter(k.hrv);
+  if (hrv) kacheln.push(kachel({ titel: "HRV letzte Nacht", wert: zahl(hrv[1]), einheit: "ms", link: "#herz", funkeDaten: k.hrv.filter((p) => p[0] >= isoMinus(30)),
+    unter: letzter(hrvText) ? `Status ${textDeutsch(letzter(hrvText)[1])}` : "" }));
+  if (schritteHeute != null) {
+    const ziel = amTag(k.schrittziel, heute) || letzter(k.schrittziel)?.[1];
+    kacheln.push(kachel({ titel: "Schritte heute", wert: zahl(schritteHeute), link: "#sport",
+      extra: ziel ? h("div", { class: "messer", role: "meter", "aria-valuemin": 0, "aria-valuemax": ziel, "aria-valuenow": schritteHeute, "aria-label": "Schrittziel" },
+        h("i", { style: { width: `${Math.min(100, (schritteHeute / ziel) * 100)}%` } })) : null,
+      unter: ziel ? `Ziel ${zahl(ziel)}` : "" }));
+  }
+  const ber = letzter(k.bereitschaft);
+  if (ber && ber[0] >= isoMinus(2)) kacheln.push(kachel({ titel: "Trainingsbereitschaft", wert: zahl(ber[1]), link: "#sport",
+    unter: letzter(bereitText) ? textDeutsch(letzter(bereitText)[1]) : "", funkeDaten: k.bereitschaft.filter((p) => p[0] >= isoMinus(30)) }));
+  const bbh = amTag(k.bb_hoch, heute);
+  if (bbJetzt != null) kacheln.push(kachel({ titel: "Body Battery", wert: zahl(bbJetzt), link: `#tag/${heute}`, unter: bbh != null ? `Tageshöchstwert ${zahl(bbh)}` : "" }));
+  const vo2 = letzter(k.vo2lauf);
+  if (vo2) kacheln.push(kachel({ titel: "VO₂max Laufen", wert: zahl(vo2[1], 1), link: "#sport", funkeDaten: k.vo2lauf,
+    unter: deltaText(vo2[1], vorTagen(k.vo2lauf, 90), 1, "", "in 90 Tagen") }));
+  if (kacheln.length) knoten.push(h("div", { class: "kacheln" }, kacheln));
+
+  // ---- Zuletzt
+  const zuletzt = akt.slice(0, 4);
+  const neuesEkg = ekgListe.find((e) => e.ts && Date.now() - e.ts * 1000 < 30 * 86400000);
+  if (zuletzt.length || neuesEkg) {
+    knoten.push(abschnitt("Zuletzt", null, h("ul", { class: "liste" },
+      zuletzt.map((a) => h("li", null, aktivitaetZeile(a))),
+      neuesEkg ? h("li", null, ekgZeile(neuesEkg, w)) : null),
+      akt.length > 4 ? h("div", { class: "knopf-zeile" }, h("a", { class: "knopf zweit", href: "#sport" }, "Alle Aktivitäten")) : null));
+  }
+  if (!Daten.index.eingerichtet) knoten.push(hinweis("Withings und Garmin sind noch nicht verbunden. Starte auf dem Chromebook das Einrichtungsfenster und folge den Schritten."));
+  else knoten.push(h("div", { class: "abschnitt" }, h("a", { class: "bericht-link", href: "#bericht" }, icon("bericht", 22),
+    h("span", null, h("b", null, "Arztbericht als PDF"), h("span", null, "Blutdruck, EKG, Körper, Schlaf und Aktivität für den nächsten Termin")), icon("vor", 20))));
+  return { titel: "Heute", knoten };
+}
+
+function aktivitaetZeile(a) {
+  const laufen = istLauf(a.typ);
+  const zahlen = [];
+  if (a.distanz) zahlen.push(["km", zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)]);
+  zahlen.push(["Dauer", dauer(a.dauer, false)]);
+  if (a.distanz && a.tempo) zahlen.push([laufen ? "min/km" : "km/h", tempoText(a.tempo, laufen)]);
+  else if (a.hf) zahlen.push(["Puls", zahl(a.hf)]);
+  return h("a", { class: "zeile", href: `#aktivitaet/${a.id}` },
+    h("span", { class: "symbol" }, icon(sportIcon(a.typ))),
+    h("span", { class: "haupt" }, h("b", null, a.name || sportName(a.typ)), h("span", null, `${datum(a.start.slice(0, 10), "wochentag")}, ${a.start.slice(11, 16)} Uhr`)),
+    h("span", { class: "kennzahlen" }, zahlen.map(([n, v]) => h("div", null, h("b", null, v), h("span", null, n)))));
+}
+function ekgZeile(e) {
+  const [text, art] = AFIB[e.afib] || [e.afib != null ? String(e.afib) : "ohne Auswertung", "neutral"];
+  return h("a", { class: "zeile", href: `#ekg/${e.q}/${e.id}` },
+    h("span", { class: "symbol" }, icon("ekg")),
+    h("span", { class: "haupt" }, h("b", null, `EKG, ${e.ts ? `${datum(isoAusMs(e.ts * 1000), "wochentag")}, ${uhr(e.ts * 1000)} Uhr` : ""}`),
+      h("span", { style: { marginTop: "4px" } }, chip(text, art))),
+    h("span", { class: "kennzahlen" }, h("div", null, h("b", null, e.hf ? zahl(e.hf) : "–"), h("span", null, "bpm"))));
+}
+
+// ======================================================================
+// Ansicht: Körper
+// ======================================================================
+async function ansichtKoerper() {
+  const [w, info] = await Promise.all([Daten.withings(), Daten.info("withings")]);
+  const knoten = [];
+  if (!wReihe(w, 1).length && !wReihe(w, 76).length) {
+    knoten.push(leer("Noch keine Körperwerte", "Sobald die Body Scan Messungen an Withings übertragen hat, erscheinen hier Gewicht, Zusammensetzung und Körperregionen."));
+    return { titel: "Körper", knoten };
+  }
+  // ---- Gewicht
+  const zg = ((info.ziele || {}).goals || {}).weight;
+  const ziel = zg && zahlOk(zg.value) ? zg.value * Math.pow(10, zg.unit || 0) : null;
+  const gewichtAlle = wTaeglich(wReihe(w, 1));
+  const gl = letzter(gewichtAlle);
+  const groesse_ = letzter(wReihe(w, 4));
+  if (gewichtAlle.length) {
+    knoten.push(abschnitt("Gewicht", gl ? `Zuletzt ${zahl(gl[1], 1)} kg am ${datum(gl[0], "kurz")}${groesse_ ? `, BMI ${zahl(gl[1] / (groesse_[1] * groesse_[1]), 1)}` : ""}` : null,
+      await verlauf({ id: "gewicht", laden: ({ von, wochen }) => {
+        const roh = imBereich(gewichtAlle, von);
+        return {
+          serien: [{ name: "Gewicht", daten: wochen ? nachWochen(roh) : roh, slot: 1, stellen: 1, einheit: "kg", endWert: true }],
+          opt: { referenzen: ziel ? [{ wert: ziel, text: `Ziel ${zahl(ziel, 1)} kg` }] : [], wochen },
+          werte: [...statistik(roh, 1, "kg"), veraenderung(roh, 1, "kg")],
+          fussnote: wochen ? `Wochenmittel aus ${roh.length} Messtagen` : `${roh.length} Messtage`,
+        };
+      } })));
+  }
+
+  // ---- Zusammensetzung (letzte vollständige Messung)
+  const letzteVoll = letzter(wReihe(w, 76));
+  if (letzteVoll) {
+    const g = wGruppe(w, letzteVoll[2]);
+    const gewichtG = g[1];
+    const teile = [["Fettmasse", g[8], 2], ["Muskelmasse", g[76], 1], ["Knochenmasse", g[88], 3]];
+    const rest = gewichtG != null ? gewichtG - (g[8] || 0) - (g[76] || 0) - (g[88] || 0) : null;
+    if (rest != null && rest > 0.05) teile.push(["Übrige fettfreie Masse", rest, 4]);
+    const summe = teile.reduce((x, t_) => x + (t_[1] || 0), 0);
+    const balken = h("div", { class: "segmentbalken", role: "img", "aria-label": teile.map((t_) => `${t_[0]} ${zahl(t_[1], 1)} kg`).join(", ") },
+      teile.filter((t_) => t_[1] > 0).map(([name, v, slot]) => {
+        const anteil = v / summe;
+        return h("div", { class: slot === 4 && !istDunkel() ? "dunkle-schrift" : "", style: { flex: `${anteil} 1 0`, background: farbe(slot) }, title: `${name}: ${zahl(v, 1)} kg (${zahl(anteil * 100)} %)` },
+          anteil > 0.11 ? `${zahl(anteil * 100)} %` : "");
+      }));
+    const vor30 = (typ) => vorTagen(wReihe(w, typ), 30, letzteVoll[0]);
+    const eintrag = (typ, name, stellen, einheit) => (g[typ] != null ? { name, wert: zahl(g[typ], stellen), einheit, neben: deltaText(g[typ], vor30(typ), stellen, einheit, "in 30 Tagen") } : null);
+    knoten.push(abschnitt("Zusammensetzung", `Messung vom ${datum(isoAusMs(letzteVoll[0]), "langJahr")}, ${uhr(letzteVoll[0])} Uhr`,
+      h("div", { class: "legende" }, teile.filter((t_) => t_[1] > 0).map(([name, , slot]) => h("span", null, h("i", { class: "kasten", style: { background: farbe(slot) } }), name))),
+      balken,
+      werteListe([
+        eintrag(6, "Körperfettanteil", 1, "%"), eintrag(8, "Fettmasse", 1, "kg"), eintrag(5, "Fettfreie Masse", 1, "kg"),
+        eintrag(76, "Muskelmasse", 1, "kg"), eintrag(88, "Knochenmasse", 2, "kg"), eintrag(77, "Körperwasser", 1, "kg"),
+        g[77] != null && gewichtG ? { name: "Wasseranteil", wert: zahl((g[77] / gewichtG) * 100, 1), einheit: "%" } : null,
+        eintrag(168, "Extrazelluläres Wasser", 1, "kg"), eintrag(169, "Intrazelluläres Wasser", 1, "kg"),
+        eintrag(170, "Viszeralfett", 1, ""), eintrag(226, "Grundumsatz", 0, "kcal"), eintrag(227, "Stoffwechselalter", 0, "Jahre"),
+      ])));
+  }
+
+  // ---- Körperregionen
+  if (letzter(wReihe(w, 175, 12)) || letzter(wReihe(w, 174, 12))) knoten.push(await segmentAbschnitt(w));
+  else knoten.push(abschnitt("Körperregionen", null, leer("Noch keine Messung der Körperregionen", "Die Body Scan misst Arme, Beine und Rumpf getrennt, wenn du beim Wiegen den Griff herausziehst und mit beiden Händen hältst.")));
+
+  // ---- Verlauf aller Körperwerte
+  const typen = [6, 76, 8, 5, 77, 88, 170, 226, 227, 168, 169].filter((t_) => wReihe(w, t_).length > 1);
+  if (typen.length) {
+    knoten.push(abschnitt("Verlauf der Körperwerte", "Ein Wert pro Messtag, ab 6 Monaten als Wochenmittel.",
+      await verlauf({ id: "koerperwerte", auswahl: typen.map((t_) => ({ id: t_, name: W_TYPEN[t_][0] })), laden: ({ von, wochen, wahl }) => {
+        const typ = +wahl;
+        const [name, einheit, stellen] = W_TYPEN[typ];
+        const roh = imBereich(wTaeglich(wReihe(w, typ)), von);
+        return { serien: [{ name, daten: wochen ? nachWochen(roh) : roh, slot: 1, stellen, einheit, endWert: true }], opt: { wochen },
+          werte: [...statistik(roh, stellen, einheit), veraenderung(roh, stellen, einheit)], fussnote: `${roh.length} Messtage` };
+      } })));
+  }
+
+  // ---- Nerven und Hautleitfähigkeit
+  const nerven = [[167, -1], [158, -1], [159, -1], [196, -1], [197, -1], [198, -1], [229, -1]].filter(([t_, p_]) => wReihe(w, t_, p_).length);
+  if (nerven.length) {
+    knoten.push(abschnitt("Nervengesundheit", "Die Body Scan misst über die Fußelektroden die Schweißdrüsenaktivität der Füße (elektrochemische Hautleitfähigkeit).",
+      await verlauf({ id: "nerven", standard: "182", hoehe: "klein", auswahl: nerven.map(([t_, p_]) => ({ id: `${t_}`, name: wName(t_, p_).replace("Elektrodermale Aktivität", "Hautleitfähigkeit") })),
+        laden: ({ von, wahl }) => {
+          const roh = imBereich(wTaeglich(wReihe(w, +wahl)), von);
+          return { serien: [{ name: wName(+wahl), daten: roh, slot: 1, endWert: true }], werte: statistik(roh, 0, "") };
+        } })));
+  }
+  return { titel: "Körper", knoten };
+}
+function zahlOk(v) { return typeof v === "number" && Number.isFinite(v); }
+
+// ---- Körperregionen wie in der Withings-App: Muskel- und Fettmasse für Arme, Beine und Rumpf
+const REGIONEN = [["rumpf", 12, "Rumpf"], ["armR", 2, "Arm rechts"], ["armL", 3, "Arm links"], ["beinR", 11, "Bein rechts"], ["beinL", 10, "Bein links"]];
+const REGION_STUFEN = {
+  muskel: { hell: ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"], dunkel: ["#184f95", "#2a78d6", "#5598e7", "#86b6ef", "#b7d3f6"], skala: [50, 80] },
+  fett: { hell: ["#fe9169", "#eb6834", "#c94908", "#9e3703", "#752600"], dunkel: ["#8a2e00", "#c94908", "#eb6834", "#fe9169", "#fec0a9"], skala: [10, 45] },
+};
+async function segmentAbschnitt(w) {
+  let modus = speicher.get("gesundheit.region") === "fett" ? "fett" : "muskel";
+  const letzte = letzter(wReihe(w, 175, 12)) || letzter(wReihe(w, 174, 12));
+  const g = wGruppe(w, letzte[2]);
+  const v = (typ, pos) => (zahlOk(g[`${typ}.${pos}`]) ? g[`${typ}.${pos}`] : null);
+  const gesamt = (pos) => (v(174, pos) != null && v(173, pos) != null ? v(174, pos) + v(173, pos) : null);
+  const fettAnteil = (pos) => (gesamt(pos) ? (v(174, pos) / gesamt(pos)) * 100 : null);
+  const muskelAnteil = (pos) => (gesamt(pos) && v(175, pos) != null ? (v(175, pos) / gesamt(pos)) * 100 : null);
+  const vor30 = (typ, pos) => vorTagen(wReihe(w, typ, pos), 30, letzte[0]);
+  const umschalter = h("div", { class: "segmente", role: "group", "aria-label": "Anzeige" });
+  const figurBox = h("div", { class: "koerper-feld" });
+  let verlaufKarte = null;
+  const zeichne = () => {
+    umschalter.replaceChildren(...[["muskel", "Muskelmasse"], ["fett", "Fettmasse"]].map(([m, name]) => h("button", { type: "button", "aria-pressed": String(m === modus),
+      disabled: (m === "muskel" ? !REGIONEN.some(([, p_]) => v(175, p_) != null) : !REGIONEN.some(([, p_]) => v(174, p_) != null)) || null,
+      onclick: () => { if (m !== modus) { modus = m; speicher.set("gesundheit.region", m); zeichne(); if (verlaufKarte) verlaufKarte.neuLaden(); } } }, name)));
+    const typ = modus === "fett" ? 174 : 175;
+    const anteil = modus === "fett" ? fettAnteil : muskelAnteil;
+    const werte = {};
+    for (const [k, pos, name] of REGIONEN) werte[k] = { wert: v(typ, pos), anteil: anteil(pos), name };
+    const zeile = (name, pos) => {
+      const fa = fettAnteil(pos);
+      const d = v(typ, pos) != null && vor30(typ, pos) != null ? v(typ, pos) - vor30(typ, pos) : null;
+      return h("tr", null, h("td", { class: "text" }, name),
+        h("td", null, v(175, pos) != null ? `${zahl(v(175, pos), 2)} kg` : "–"),
+        h("td", null, v(174, pos) != null ? `${zahl(v(174, pos), 2)} kg` : "–"),
+        h("td", null, fa != null ? `${zahl(fa)} %` : "–"),
+        h("td", null, d != null ? `${vorzeichen(d, 2)} kg` : "–"));
+    };
+    const seiten = (links, rechts, name) => {
+      const l = v(typ, links), r = v(typ, rechts);
+      if (l == null || r == null) return null;
+      const diff = ((l - r) / ((l + r) / 2)) * 100;
+      const ausgeglichen = Math.abs(diff) < 3;
+      return { name, wert: ausgeglichen ? "ausgeglichen" : `links ${diff > 0 ? "mehr" : "weniger"}`, neben: `${vorzeichen(diff, 1)} % (links ${zahl(l, 2)} kg, rechts ${zahl(r, 2)} kg)` };
+    };
+    const [a, b] = REGION_STUFEN.fett.skala;
+    figurBox.replaceChildren(
+      koerperFigur(werte, modus),
+      h("div", null,
+        modus === "fett" ? h("div", { class: "region-legende" },
+          h("span", null, "Farbe: Fettanteil des Bereichs"),
+          h("span", { class: "stufen" }, REGION_STUFEN.fett[istDunkel() ? "dunkel" : "hell"].map((c) => h("i", { style: { background: c } }))),
+          h("span", null, `${a} % bis ${b} % und mehr`)) : null,
+        h("div", { class: "tabellen-rahmen region-tabelle" }, h("table", { class: "tabelle" },
+          h("thead", null, h("tr", null, h("th", null, "Bereich"), h("th", null, "Muskeln"), h("th", null, "Fett"), h("th", null, "Fettanteil"), h("th", { title: `Veränderung der ${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in 30 Tagen` }, "± 30 Tage"))),
+          h("tbody", null, REGIONEN.map(([, pos, name]) => zeile(name, pos))))),
+        werteListe([seiten(3, 2, `Arme, ${modus === "fett" ? "Fett" : "Muskeln"}`), seiten(10, 11, `Beine, ${modus === "fett" ? "Fett" : "Muskeln"}`)])));
+  };
+  zeichne();
+  verlaufKarte = await verlauf({ id: "regionen", titel: "Verlauf je Körperbereich", standard: "182",
+    auswahl: [{ id: "arme", name: "Arme" }, { id: "beine", name: "Beine" }, { id: "rumpf", name: "Rumpf" }],
+    laden: ({ von, wochen, wahl }) => {
+      const typ = modus === "fett" ? 174 : 175;
+      const teil = { arme: [[3, "Arm links", 1], [2, "Arm rechts", 2]], beine: [[10, "Bein links", 1], [11, "Bein rechts", 2]], rumpf: [[12, "Rumpf", 1]] }[wahl];
+      const serien = teil.map(([pos, name, slot]) => {
+        const roh = imBereich(wTaeglich(wReihe(w, typ, pos)), von);
+        return { name, daten: wochen ? nachWochen(roh) : roh, slot, stellen: 2, einheit: "kg", endWert: true };
+      });
+      return { serien, opt: { wochen }, fussnote: `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in kg, je Messung der Body Scan mit Griff.` };
+    } });
+  return abschnitt("Körperregionen", `Muskel- und Fettmasse von Armen, Beinen und Rumpf, Messung vom ${datum(isoAusMs(letzte[0]), "langJahr")}.`,
+    umschalter, figurBox,
+    h("p", { class: "fussnote" }, "Die Body Scan misst die Körperregionen, wenn du den Griff mit beiden Händen hältst. „± 30 Tage“ ist die Veränderung gegenüber der Messung vor rund einem Monat. Vergleichswerte anderer Menschen gleichen Alters, wie sie die Withings-App zeigt, gibt Withings über die Schnittstelle nicht heraus."),
+    verlaufKarte);
+}
+
+function istDunkel() {
+  const t_ = document.documentElement.getAttribute("data-theme");
+  return t_ ? t_ === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+}
+/** Körperfigur von vorn mit fünf Bereichen; Farbe nach Anteil, Beschriftung mit kg (und Fettanteil) */
+function koerperFigur(werte, modus) {
+  const st = REGION_STUFEN[modus];
+  const dunkel = istDunkel();
+  const stufen = st[dunkel ? "dunkel" : "hell"];
+  const [a, b] = st.skala;
+  // Muskeln einfarbig (mittlere Stufe), Fett nach Fettanteil des Bereichs
+  const stufe = (anteil) => (modus !== "fett" || anteil == null ? 2 : Math.max(0, Math.min(4, Math.floor(((anteil - a) / (b - a)) * 5))));
+  const schrift = (i) => ((i >= 2) !== dunkel ? "#ffffff" : dunkel ? "#0c1417" : "#12262e");
+  const svg = s("svg", { class: "koerperfigur", viewBox: "0 0 440 600", role: "img",
+    "aria-label": `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} je Körperbereich: ${Object.values(werte).map((x) => `${x.name} ${x.wert != null ? zahl(x.wert, 2) + " kg" : "keine Messung"}`).join(", ")}` });
+  const FORMEN = {
+    rumpf: "M184 104 C172 110 160 113 152 118 C150 132 151 146 153 160 C155 196 160 222 160 246 C160 268 149 284 147 301 C166 316 184 328 200 333 C216 328 234 316 253 301 C251 284 240 268 240 246 C240 222 245 196 247 160 C249 146 250 132 248 118 C240 113 228 110 216 104 C208 109 192 109 184 104 Z",
+    armR: "M148 116 C132 118 122 128 120 144 L113 204 C111 218 109 230 108 240 L100 300 C99 308 97 314 96 320 C92 334 91 348 96 360 C100 368 108 368 112 360 C115 352 114 336 115 322 L124 266 C126 256 129 246 131 236 L140 184 C142 172 145 164 148 158 C146 144 146 130 148 116 Z",
+    armL: "M252 116 C268 118 278 128 280 144 L287 204 C289 218 291 230 292 240 L300 300 C301 308 303 314 304 320 C308 334 309 348 304 360 C300 368 292 368 288 360 C285 352 286 336 285 322 L276 266 C274 256 271 246 269 236 L260 184 C258 172 255 164 252 158 C254 144 254 130 252 116 Z",
+    beinR: "M147 305 C144 328 141 352 142 374 C143 398 148 420 151 440 C153 452 151 466 151 480 C151 506 156 528 160 548 C161 556 156 562 150 568 C148 574 156 578 166 577 C174 576 179 572 179 566 C179 558 177 552 177 546 C178 524 182 502 182 480 C182 466 180 452 182 440 C185 418 191 396 194 372 C195 360 197 348 198 338 C182 332 164 320 147 305 Z",
+    beinL: "M253 305 C256 328 259 352 258 374 C257 398 252 420 249 440 C247 452 249 466 249 480 C249 506 244 528 240 548 C239 556 244 562 250 568 C252 574 244 578 234 577 C226 576 221 572 221 566 C221 558 223 552 223 546 C222 524 218 502 218 480 C218 466 220 452 218 440 C215 418 209 396 206 372 C205 360 203 348 202 338 C218 332 236 320 253 305 Z",
+  };
+  const koerper = s("g", { transform: "translate(20 0)" });
+  svg.append(koerper);
+  koerper.append(s("ellipse", { cx: 200, cy: 54, rx: 28, ry: 35, class: "kopf-form" }), s("path", { d: "M188 82 L212 82 L214 110 L186 110 Z", class: "kopf-form" }));
+  for (const [k, d] of Object.entries(FORMEN)) {
+    const x = werte[k];
+    const p_ = s("path", { d, class: "segment", fill: x && x.wert != null ? stufen[stufe(x.anteil)] : "var(--blatt-2)" });
+    p_.append(s("title", null, `${x.name}: ${x.wert != null ? `${zahl(x.wert, 2)} kg` : "keine Messung"}${x.anteil != null && modus === "fett" ? `, ${zahl(x.anteil)} % Fett` : ""}`));
+    koerper.append(p_);
+  }
+  const text = (x) => (x.wert != null ? `${zahl(x.wert, x.wert >= 10 ? 1 : 2)} kg` : "–");
+  const unter = (x) => (modus === "fett" && x.anteil != null ? `${x.name}, ${zahl(x.anteil)} %` : x.name);
+  const etikett = (k, x0, y, anker) => {
+    const x = werte[k];
+    const gr = s("g", { class: "etikett" });
+    gr.append(s("text", { x: x0, y: y, "text-anchor": anker, class: "wert" }, text(x)));
+    gr.append(s("text", { x: x0, y: y + 18, "text-anchor": anker, class: "name" }, unter(x)));
+    return gr;
+  };
+  const r = werte.rumpf;
+  const innen = schrift(stufe(r.anteil));
+  const rumpf = s("g", { class: "etikett" });
+  rumpf.append(s("text", { x: 220, y: 190, "text-anchor": "middle", class: "wert", style: `fill:${r.wert != null ? innen : "var(--tinte)"}` }, text(r)));
+  rumpf.append(s("text", { x: 220, y: 208, "text-anchor": "middle", class: "name", style: `fill:${r.wert != null ? innen : "var(--tinte-2)"}` }, modus === "fett" && r.anteil != null ? `Rumpf, ${zahl(r.anteil)} %` : "Rumpf"));
+  svg.append(rumpf,
+    etikett("armR", 4, 208, "start"), etikett("armL", 436, 208, "end"),
+    etikett("beinR", 4, 414, "start"), etikett("beinL", 436, 414, "end"),
+    s("text", { x: 220, y: 596, "text-anchor": "middle", class: "seiten-hinweis" }, "Ansicht von vorn"));
+  return svg;
+}
+
+// ======================================================================
+// Ansicht: Herz
+// ======================================================================
+async function ansichtHerz() {
+  const [w, ekgListe] = await Promise.all([Daten.withings(), Daten.ekg()]);
+  const hrvText = await Daten.texte("g.hrv.status", isoMinus(10));
+  const knoten = [];
+  const mw = (l) => (l.length ? [mittel(l.map((m) => m.sys)), mittel(l.map((m) => m.dia)), mittel(l.map((m) => m.puls).filter(zahlOk))] : null);
+  const bpText = (x) => `${zahl(x[0])}/${zahl(x[1])}`;
+
+  // ---- Blutdruck
+  const bpAlle = blutdruckMessungen(w);
+  if (bpAlle.length) {
+    knoten.push(abschnitt("Blutdruck", "Selbstmessung mit der BPM Vision. Bis 3 Monate jede einzelne Messung, ab 6 Monaten Wochenmittel.",
+      await verlauf({ id: "blutdruck", auswahl: [{ id: "alle", name: "Alle Messungen" }, { id: "morgens", name: "Morgens" }, { id: "abends", name: "Abends" }],
+        laden: ({ von, wochen, wahl }) => {
+          const imZr = bpAlle.filter((m) => !von || m.ts >= tagMs(von));
+          const bp = imZr.filter((m) => wahl === "alle" || (wahl === "morgens") === istMorgens(m.ts));
+          if (!bp.length) return { serien: [] };
+          const mo = imZr.filter((m) => istMorgens(m.ts)), ab = imZr.filter((m) => !istMorgens(m.ts));
+          const [m0, a0, g0] = [mw(mo), mw(ab), mw(imZr)];
+          const ueber = g0 && (g0[0] >= 135 || g0[1] >= 85);
+          const hoechst = imZr.reduce((x, m) => (m.sys > x.sys ? m : x), imZr[0]);
+          const sys = bp.map((m) => [m.ts, m.sys]), dia = bp.map((m) => [m.ts, m.dia]);
+          const ys = bp.flatMap((m) => [m.sys, m.dia]);
+          return {
+            liste: [
+              m0 ? { name: "Mittel morgens", wert: bpText(m0), einheit: "mmHg", neben: `${mo.length} Messungen` } : null,
+              a0 ? { name: "Mittel abends", wert: bpText(a0), einheit: "mmHg", neben: `${ab.length} Messungen` } : null,
+              g0 ? { name: "Mittel gesamt", wert: bpText(g0), einheit: "mmHg", neben: chip(ueber ? "über dem Grenzwert 135/85" : "unter dem Grenzwert 135/85", ueber ? "ernst" : "gut") } : null,
+              g0 && g0[2] ? { name: "Puls bei der Messung", wert: zahl(g0[2]), einheit: "bpm" } : null,
+              { name: "Höchster Wert", wert: `${zahl(hoechst.sys)}/${zahl(hoechst.dia)}`, einheit: "mmHg", neben: kurzZeit(hoechst.ts) },
+            ],
+            serien: [
+              { name: "Systolisch", daten: wochen ? nachWochen(sys) : sys, slot: 1, einheit: "mmHg", endWert: true },
+              { name: "Diastolisch", daten: wochen ? nachWochen(dia) : dia, slot: 2, einheit: "mmHg", endWert: true },
+            ],
+            opt: { yMin: Math.floor(Math.min(60, ...ys.map((y) => y - 6)) / 20) * 20, yMax: Math.ceil(Math.max(150, ...ys.map((y) => y + 6)) / 20) * 20, yIntervall: 20,
+              mitUhrzeit: !wochen, wochen, referenzen: [{ wert: 135, text: "135" }, { wert: 85, text: "85" }] },
+            fussnote: `${bp.length} Messungen${wochen ? ", als Wochenmittel" : ""}. Gestrichelt: 135/85 mmHg, der Grenzwert für den Mittelwert der Selbstmessung zu Hause.`,
+          };
+        } })));
+
+    // Puls bei der Messung
+    knoten.push(h("div", { class: "abschnitt" }, await verlauf({ id: "bp_puls", titel: "Puls bei der Blutdruckmessung", laden: ({ von, wochen }) => {
+      const imZr = bpAlle.filter((m) => (!von || m.ts >= tagMs(von)) && zahlOk(m.puls));
+      const reihe = (liste) => { const p_ = liste.map((m) => [m.ts, m.puls]); return wochen ? nachWochen(p_) : tagesMittel(p_); };
+      const mo = reihe(imZr.filter((m) => istMorgens(m.ts))), ab = reihe(imZr.filter((m) => !istMorgens(m.ts)));
+      return { serien: [{ name: "Morgens", daten: mo, slot: 1, einheit: "bpm", endWert: true }, { name: "Abends", daten: ab, slot: 2, einheit: "bpm", endWert: true }].filter((x) => x.daten.length),
+        werte: statistik(imZr.map((m) => [m.ts, m.puls]), 0, "bpm"), opt: { wochen }, fussnote: wochen ? "Mittelwert je Woche." : "Mittelwert je Tag." };
+    } })));
+
+    // Wochenmittel und letzte Messungen
+    const wochen = new Map();
+    for (const m of bpAlle.filter((x) => x.ts >= tagMs(isoMinus(7 * 26)))) {
+      const [j, kw] = isoWoche(m.ts);
+      const key = `${j}-${zweistellig(kw)}`;
+      if (!wochen.has(key)) wochen.set(key, { j, kw, mo: [], ab: [] });
+      wochen.get(key)[istMorgens(m.ts) ? "mo" : "ab"].push(m);
+    }
+    const fmt = (l) => (l.length ? bpText(mw(l)) : "–");
+    const letzte = bpAlle.slice(-14).reverse();
+    knoten.push(abschnitt("Wochenmittel und letzte Messungen", "Die letzten 26 Wochen und die 14 neuesten Messungen. Einzelwerte sind nach der Einteilung der Europäischen Hochdruckgesellschaft (ESH) eingestuft; das ersetzt keine ärztliche Beurteilung.", h("div", { class: "raster zwei" },
+      h("div", { class: "tabellen-rahmen", style: { maxHeight: "420px" } }, h("table", { class: "tabelle" },
+        h("thead", null, h("tr", null, h("th", null, "Woche"), h("th", null, "Morgens"), h("th", null, "Abends"), h("th", null, "Anzahl"))),
+        h("tbody", null, [...wochen.values()].reverse().map((x) => h("tr", null, h("td", null, `KW ${x.kw}/${String(x.j).slice(2)}`), h("td", null, fmt(x.mo)), h("td", null, fmt(x.ab)), h("td", null, x.mo.length + x.ab.length)))))),
+      h("div", { class: "tabellen-rahmen", style: { maxHeight: "420px" } }, h("table", { class: "tabelle" },
+        h("thead", null, h("tr", null, h("th", null, "Zeitpunkt"), h("th", null, "Wert"), h("th", null, "Puls"), h("th", null, "Einstufung"))),
+        h("tbody", null, letzte.map((m) => { const [t_, a_] = bpKlasse(m.sys, m.dia); return h("tr", null,
+          h("td", null, kurzZeit(m.ts)), h("td", null, `${m.sys}/${m.dia}`), h("td", null, m.puls ?? "–"), h("td", null, chip(t_, a_))); })))))));
+  } else {
+    knoten.push(abschnitt("Blutdruck", null, leer("Noch keine Blutdruckmessung", "Messungen der BPM Vision erscheinen hier, sobald sie an Withings übertragen wurden.")));
+  }
+
+  // ---- Ruhepuls
+  const waagePuls = [];
+  for (const [, zeilen] of w._grp) {
+    const typen = new Set(zeilen.map((r) => r[1]));
+    if (typen.has(11) && !typen.has(10)) { const r = zeilen.find((x) => x[1] === 11); waagePuls.push([r[0] * 1000, r[2]]); }
+  }
+  waagePuls.sort((x, y) => x[0] - y[0]);
+  const rpLetzt = letzter(await kennzahl("ruhepuls", isoMinus(14)));
+  if (rpLetzt || waagePuls.length) {
+    knoten.push(abschnitt("Ruhepuls", rpLetzt ? `Zuletzt ${zahl(rpLetzt[1])} bpm am ${datum(rpLetzt[0], "kurz")}` : null, await verlauf({ id: "ruhepuls", laden: async ({ von, wochen }) => {
+      const uhr_ = await kennzahl("ruhepuls", von);
+      const waage = tagesMittel(imBereich(waagePuls, von));
+      return {
+        serien: [
+          uhr_.length ? { name: "Ruhepuls (Uhr)", daten: wochen ? nachWochen(uhr_) : uhr_, slot: 1, einheit: "bpm", endWert: true } : null,
+          waage.length ? { name: "Puls auf der Waage", daten: wochen ? nachWochen(waage) : waage, slot: 2, einheit: "bpm", endWert: true } : null,
+        ].filter(Boolean),
+        werte: statistik(uhr_.length ? uhr_ : waage, 0, "bpm"), opt: { wochen },
+      };
+    } })));
+  }
+
+  // ---- HRV mit Normalbereich
+  const hrvLetzt = letzter(await kennzahl("hrv", isoMinus(14)));
+  if (hrvLetzt) {
+    knoten.push(abschnitt("Herzfrequenzvariabilität", `Mittelwert jeder Nacht. Die Fläche zeigt deinen persönlichen Normalbereich laut Garmin.${letzter(hrvText) ? ` Status: ${textDeutsch(letzter(hrvText)[1])}.` : ""}`,
+      await verlauf({ id: "hrv", laden: async ({ von, wochen }) => {
+        const k = await kennzahlen(["hrv", "hrv_unten", "hrv_oben"], von);
+        const [hrv, untenR, obenR] = wochen ? [nachWochen(k.hrv), nachWochen(k.hrv_unten), nachWochen(k.hrv_oben)] : [k.hrv, k.hrv_unten, k.hrv_oben];
+        const unten = new Map(untenR), oben = new Map(obenR);
+        const band = hrv.map((p_) => p_[0]).filter((d) => unten.has(d) && oben.has(d));
+        return {
+          serien: [
+            { name: "Normalbereich unten", daten: band.map((d) => [d, unten.get(d)]), slot: "--serie-1", unsichtbar: true, stapel: "band", punkte: false },
+            { name: "Normalbereich", daten: band.map((d) => [d, oben.get(d) - unten.get(d)]), slot: "--serie-1", unsichtbar: true, stapel: "band", flaeche: true, flaecheDeckkraft: 0.12, punkte: false, ohneLegende: true },
+            { name: "HRV", daten: hrv, slot: 1, einheit: "ms", endWert: true, z: 3 },
+          ],
+          werte: statistik(k.hrv, 0, "ms"),
+          opt: { wochen, tooltipExtra: (params) => { const x = isoAusMs(params[0].value[0]); return unten.has(x) ? `<div style="margin-top:4px;color:${css("--tinte-2")}">Normalbereich ${zahl(unten.get(x))}–${zahl(oben.get(x))} ms</div>` : ""; } },
+          tabelle: () => serienTabelle([{ name: "HRV", daten: hrv, einheit: "ms" }, { name: "Normal unten", daten: untenR, einheit: "ms" }, { name: "Normal oben", daten: obenR, einheit: "ms" }], { wochen }),
+        };
+      } })));
+  }
+
+  // ---- Gefäße
+  const gefaesse = [91, 155, 140].filter((t_) => wReihe(w, t_).length);
+  if (gefaesse.length) {
+    knoten.push(abschnitt("Gefäße", "Pulswellengeschwindigkeit und Gefäßalter misst die Body Scan beim Wiegen.",
+      await verlauf({ id: "gefaesse", standard: "182", auswahl: gefaesse.map((t_) => ({ id: t_, name: W_TYPEN[t_][0] })), laden: ({ von, wahl }) => {
+        const [name, einheit, stellen] = W_TYPEN[+wahl];
+        const roh = imBereich(wTaeglich(wReihe(w, +wahl)), von);
+        return { serien: [{ name, daten: roh, slot: 1, stellen, einheit, endWert: true }], werte: [...statistik(roh, stellen, einheit), veraenderung(roh, stellen, einheit)] };
+      } })));
+  }
+
+  // ---- EKG
+  knoten.push(abschnitt("EKG", ekgListe.length ? "Aufzeichnungen von Withings und Garmin. Tippe auf eine Aufzeichnung, um die Kurve zu sehen." : null,
+    ekgListe.length ? h("ul", { class: "liste" }, ekgListe.map((e_) => h("li", null, ekgZeile(e_, w))))
+      : leer("Noch kein EKG", "EKG-Aufzeichnungen der Body Scan erscheinen hier mit Kurve und Auswertung.")));
+  return { titel: "Herz", knoten };
+}
+/** Mehrere Werte am Tag zu einem Tagesmittel (x als Datum) */
+function tagesMittel(paare) {
+  const m = new Map();
+  for (const [x, v] of paare) { if (!Number.isFinite(v)) continue; const d = typeof x === "number" ? isoAusMs(x) : x; if (!m.has(d)) m.set(d, []); m.get(d).push(v); }
+  return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([d, l]) => [d, mittel(l)]);
+}
+
+// ======================================================================
+// Ansicht: EKG (Papierstreifen)
+// ======================================================================
+async function ansichtEkg(q, id) {
+  const [liste, w] = await Promise.all([Daten.ekg(), Daten.withings()]);
+  const e = liste.find((x) => x.q === q && String(x.id) === String(id));
+  const knoten = [];
+  if (!e) return { titel: "EKG", zurueck: "#herz", knoten: [leer("EKG nicht gefunden", "")] };
+  const kurve = e.kurve ? await Daten.datei(`d/ekg/${q}-${id}.enc`) : null;
+  const [text, art] = AFIB[e.afib] || [e.afib != null ? String(e.afib) : "ohne Auswertung", "neutral"];
+  // Intervalle aus den Withings-Messungen in der Nähe
+  const nahe = (typ) => { const r = wReihe(w, typ).find((x) => Math.abs(x[0] - e.ts * 1000) < 15 * 60000); return r ? r[1] : null; };
+  const pos = { 0: "rechtes Handgelenk", 1: "linkes Handgelenk" }[kurve?.pos];
+  knoten.push(h("div", { class: "abschnitt" },
+    h("p", { class: "leise" }, e.ts ? `${datum(isoAusMs(e.ts * 1000), "langJahr")}, ${uhr(e.ts * 1000)} Uhr` : ""),
+    h("div", { style: { margin: "10px 0 16px" } }, chip(text, art)),
+    werteListe([
+      e.hf ? { name: "Herzfrequenz", wert: zahl(e.hf), einheit: "bpm" } : null,
+      nahe(135) != null ? { name: "QRS-Dauer", wert: zahl(nahe(135)), einheit: "ms" } : null,
+      nahe(136) != null ? { name: "PR-Intervall", wert: zahl(nahe(136)), einheit: "ms" } : null,
+      nahe(137) != null ? { name: "QT-Intervall", wert: zahl(nahe(137)), einheit: "ms" } : null,
+      nahe(138) != null ? { name: "QTc-Intervall", wert: zahl(nahe(138)), einheit: "ms" } : null,
+      e.sys ? { name: "Blutdruck dabei", wert: `${e.sys}/${e.dia}`, einheit: "mmHg" } : null,
+      kurve ? { name: "Aufzeichnung", wert: zahl(kurve.signal.length / (kurve.freq || 300), 0), einheit: "s", neben: pos ? `Elektroden: ${pos}` : "" } : null,
+    ])));
+  if (kurve && kurve.signal && kurve.signal.length) {
+    const papier = h("div", { class: "ekg-papier" });
+    knoten.push(h("div", { class: "abschnitt" }, papier,
+      h("div", { class: "ekg-legende" }, h("span", null, "Papiervorschub 25 mm/s"), h("span", null, "Verstärkung 10 mm/mV"), h("span", null, "Ableitung I")),
+      h("p", { class: "fussnote" }, "Die Auswertung stammt vom Gerät. Ein EKG ohne Befund schließt Herzerkrankungen nicht aus – bei Beschwerden ärztlich abklären.")));
+    NACH.push(() => ekgZeichnen(papier, kurve.signal, kurve.freq || 300));
+  } else {
+    knoten.push(hinweis("Für diese Aufzeichnung liegt keine Kurve vor."));
+  }
+  return { titel: "EKG", zurueck: "#herz", knoten };
+}
+function ekgZeichnen(box, signal, freq) {
+  const breite = Math.max(300, box.clientWidth - 2);
+  const sekProZeile = breite >= 900 ? 10 : 5;
+  const rand = 9; // mm links: Eichzacke und Zeitmarken
+  const pxMm = Math.max(2.4, Math.min(5, breite / (sekProZeile * 25 + rand)));
+  const zeileMm = 32;
+  const proZeile = Math.round(sekProZeile * freq);
+  const zeilen = Math.ceil(signal.length / proZeile);
+  const w_ = Math.round((sekProZeile * 25 + rand) * pxMm), h_ = Math.round(zeilen * zeileMm * pxMm);
+  const dpr = window.devicePixelRatio || 1;
+  const c = h("canvas", { width: Math.round(w_ * dpr), height: Math.round(h_ * dpr), style: { width: `${w_}px`, height: `${h_}px` }, role: "img", "aria-label": `EKG-Kurve, ${Math.round(signal.length / freq)} Sekunden` });
+  const g = c.getContext("2d");
+  g.scale(dpr, dpr);
+  g.fillStyle = css("--blatt"); g.fillRect(0, 0, w_, h_);
+  // Raster: 1 mm fein, 5 mm kräftig
+  const fein = css("--rose-zart"), grob = css("--rose-mittel");
+  g.lineWidth = 1;
+  for (let mm = 0; mm * pxMm <= w_; mm++) { g.strokeStyle = mm % 5 ? fein : grob; g.beginPath(); g.moveTo(Math.round(mm * pxMm) + 0.5, 0); g.lineTo(Math.round(mm * pxMm) + 0.5, h_); g.stroke(); }
+  for (let mm = 0; mm * pxMm <= h_; mm++) { g.strokeStyle = mm % 5 ? fein : grob; g.beginPath(); g.moveTo(0, Math.round(mm * pxMm) + 0.5); g.lineTo(w_, Math.round(mm * pxMm) + 0.5); g.stroke(); }
+  // Einheit erraten: Millivolt statt Mikrovolt?
+  const probe = signal.slice(0, Math.min(signal.length, freq * 5)).map((x) => Math.abs(x));
+  const faktor = probe.sort((a, b) => a - b)[Math.floor(probe.length * 0.98)] < 20 ? 1000 : 1;
+  g.strokeStyle = css("--tinte"); g.lineWidth = 1.3; g.lineJoin = "round";
+  for (let z = 0; z < zeilen; z++) {
+    const teil = signal.slice(z * proZeile, (z + 1) * proZeile);
+    const sortiert = [...teil].sort((a, b) => a - b);
+    const mitte = sortiert[Math.floor(sortiert.length / 2)] || 0;
+    const y0 = (z * zeileMm + zeileMm * 0.55) * pxMm;
+    g.beginPath();
+    teil.forEach((v, i) => {
+      const x = (rand + (i / freq) * 25) * pxMm;
+      const y = y0 - ((v - mitte) * faktor / 1000) * 10 * pxMm;
+      if (i) g.lineTo(x, y); else g.moveTo(x, y);
+    });
+    g.stroke();
+    // Zeitmarke
+    g.fillStyle = css("--tinte-2"); g.font = `600 11px ${SCHRIFT}`;
+    g.fillText(`${z * sekProZeile} s`, 4, z * zeileMm * pxMm + 13);
+    // Eichzacke 1 mV (0,2 s breit) am Zeilenanfang
+    g.lineWidth = 1.5;
+    const ex = 1.5 * pxMm;
+    g.beginPath(); g.moveTo(ex, y0); g.lineTo(ex + pxMm, y0); g.lineTo(ex + pxMm, y0 - 10 * pxMm); g.lineTo(ex + 6 * pxMm, y0 - 10 * pxMm); g.lineTo(ex + 6 * pxMm, y0); g.lineTo(ex + 7 * pxMm, y0); g.stroke();
+    g.lineWidth = 1.3;
+  }
+  box.replaceChildren(c);
+}
+
+// ======================================================================
+// Ansicht: Schlaf
+// ======================================================================
+const PHASEN = [["Tief", "--phase-tief"], ["Leicht", "--phase-leicht"], ["REM", "--phase-rem"], ["Wach", "--phase-wach"]];
+async function letzteNacht() {
+  const tage = (Daten.index.verlaeufe || []).slice(-4).reverse();
+  for (const t of tage) { const d = await Daten.tag(t); if (d && d.schlaf && d.schlaf.phasen && d.schlaf.phasen.length) return [t, d.schlaf]; }
+  return [null, null];
+}
+function schlafphasenFigur(schlaf, titel = null) {
+  const phasen = schlaf.phasen.filter((p) => p[0] && p[1]);
+  const stufe = (lvl) => (lvl >= 2.5 ? 3 : lvl >= 1.5 ? 2 : lvl >= 0.5 ? 1 : 0); // 0 tief, 1 leicht, 2 REM, 3 wach
+  const zeichnen = (div) => {
+    const farben = PHASEN.map((p) => css(p[1]));
+    return neuesDiagramm(div, {
+      animation: BEWEGUNG, grid: { left: 4, right: 12, top: 8, bottom: 4, containLabel: true },
+      xAxis: { type: "time", min: phasen[0][0], max: phasen[phasen.length - 1][1], splitNumber: 4, axisLine: { lineStyle: { color: css("--linie-stark") } }, axisTick: { show: false },
+        axisLabel: { ...textStil(), hideOverlap: true, showMinLabel: false, showMaxLabel: false, formatter: (v) => DF.zeit.format(new Date(v)) }, splitLine: { show: false } },
+      yAxis: { type: "category", data: PHASEN.map((p) => p[0]), axisLine: { show: false }, axisTick: { show: false }, axisLabel: textStil(),
+        splitLine: { show: true, lineStyle: { color: css("--linie") } } },
+      tooltip: { trigger: "item", ...tooltipStil(), formatter: (p) => `<div style="color:${css("--tinte-2")};font-size:12px">${uhr(p.value[0])}–${uhr(p.value[1])} Uhr</div>${tooltipZeile(farben[p.value[2]], dauer((p.value[1] - p.value[0]) / 1000), PHASEN[p.value[2]][0])}` },
+      series: [{
+        type: "custom", data: phasen.map((p) => [p[0], p[1], stufe(p[2])]),
+        encode: { x: [0, 1], y: 2 },
+        renderItem: (params, api) => {
+          const y = api.value(2);
+          const a = api.coord([api.value(0), y]), b = api.coord([api.value(1), y]);
+          const hoehe_ = api.size([0, 1])[1] * 0.72;
+          return { type: "rect", shape: { x: a[0], y: a[1] - hoehe_ / 2, width: Math.max(1, b[0] - a[0]), height: hoehe_, r: 2 }, style: { fill: farben[y] } };
+        },
+      }],
+    });
+  };
+  const anteile = [0, 0, 0, 0];
+  for (const p of phasen) anteile[stufe(p[2])] += (p[1] - p[0]) / 1000;
+  return figur({ titel, hoehe: "klein", zeichnen,
+    legende: h("div", { class: "legende" }, PHASEN.map((p, i) => h("span", null, h("i", { class: "kasten", style: { background: css(p[1]) } }), `${p[0]} ${dauer(anteile[i])}`))),
+    tabelle: () => h("table", { class: "tabelle" }, h("thead", null, h("tr", null, h("th", null, "Von"), h("th", null, "Bis"), h("th", null, "Phase"), h("th", null, "Dauer"))),
+      h("tbody", null, phasen.map((p) => h("tr", null, h("td", null, uhr(p[0])), h("td", null, uhr(p[1])), h("td", null, PHASEN[stufe(p[2])][0]), h("td", null, dauer((p[1] - p[0]) / 1000)))))) });
+}
+async function ansichtSchlaf() {
+  const knoten = [];
+  const [nachtTag, nacht] = await letzteNacht();
+  if (nacht) {
+    const wv = nacht.werte || {};
+    const qual = nacht.texte && nacht.texte["sleepScores.overall.qualifierKey"];
+    knoten.push(abschnitt(nachtTag === heuteIso() ? "Letzte Nacht" : `Nacht zum ${datum(nachtTag, "wochentag")}`,
+      nacht.start ? `${uhr(nacht.start)} bis ${uhr(nacht.ende)} Uhr` : null,
+      werteListe([
+        wv.sleepTimeSeconds != null ? { name: "Schlafdauer", wert: dauer(wv.sleepTimeSeconds, false), einheit: "Std." } : null,
+        wv["sleepScores.overall.value"] != null ? { name: "Schlafscore", wert: zahl(wv["sleepScores.overall.value"]), neben: qual ? textDeutsch(qual) : "" } : null,
+        wv.deepSleepSeconds != null ? { name: "Tiefschlaf", wert: dauer(wv.deepSleepSeconds, false), einheit: "Std." } : null,
+        wv.remSleepSeconds != null ? { name: "REM-Schlaf", wert: dauer(wv.remSleepSeconds, false), einheit: "Std." } : null,
+        wv.avgOvernightHrv != null ? { name: "HRV in der Nacht", wert: zahl(wv.avgOvernightHrv), einheit: "ms" } : null,
+        wv.restingHeartRate != null ? { name: "Ruhepuls", wert: zahl(wv.restingHeartRate), einheit: "bpm" } : null,
+        wv.averageRespirationValue != null ? { name: "Atemfrequenz", wert: zahl(wv.averageRespirationValue, 1), einheit: "/min" } : null,
+        wv.averageSpO2Value != null ? { name: "SpO₂ im Mittel", wert: zahl(wv.averageSpO2Value), einheit: "%" } : null,
+        wv.bodyBatteryChange != null ? { name: "Body Battery", wert: vorzeichen(wv.bodyBatteryChange) } : null,
+        wv.awakeCount != null ? { name: "Wachphasen", wert: zahl(wv.awakeCount) } : null,
+      ]),
+      h("div", { style: { marginTop: "20px" } }, schlafphasenFigur(nacht, "Schlafphasen"))));
+  }
+  const hatSchlaf = (await kennzahl("schlaf_dauer", isoMinus(365))).length > 0;
+  if (!hatSchlaf && !nacht) { knoten.push(leer("Noch keine Schlafdaten", "Trage die Uhr nachts, dann erscheinen hier Dauer, Phasen und Schlafscore.")); return { titel: "Schlaf", knoten }; }
+  const std = (v) => dauer(v * 3600, false);
+  if (hatSchlaf) {
+    knoten.push(abschnitt("Schlafdauer und Phasen", "Pro Nacht, ab 6 Monaten als Wochenmittel.", await verlauf({ id: "schlaf", hoehe: "gross", laden: async ({ von, wochen }) => {
+      const k = await kennzahlen(["schlaf_dauer", "schlaf_tief", "schlaf_leicht", "schlaf_rem", "schlaf_wach"], von);
+      const w_ = (r) => (wochen ? nachWochen(r) : r);
+      const mittelH = (r) => mittel(r.map((p_) => p_[1]));
+      const werte = [
+        k.schlaf_dauer.length ? { name: "Schlafdauer", wert: std(mittelH(k.schlaf_dauer)), einheit: "Std." } : null,
+        k.schlaf_tief.length ? { name: "Tiefschlaf", wert: std(mittelH(k.schlaf_tief)), einheit: "Std." } : null,
+        k.schlaf_rem.length ? { name: "REM", wert: std(mittelH(k.schlaf_rem)), einheit: "Std." } : null,
+        k.schlaf_wach.length ? { name: "Wach", wert: dauer(mittelH(k.schlaf_wach) * 3600) } : null,
+      ];
+      if (k.schlaf_tief.length) {
+        const reihen = [["schlaf_tief", 0], ["schlaf_leicht", 1], ["schlaf_rem", 2], ["schlaf_wach", 3]];
+        return { werte, serien: reihen.map(([id, i], n) => ({ name: PHASEN[i][0], daten: w_(k[id]), slot: PHASEN[i][1], art: "balken", stapel: "phasen", oben: n === 3, format: (v) => dauer(v * 3600) })),
+          opt: { nullBasis: true, yFormat: (v) => `${zahl(v)} h`, wochen }, fussnote: `Mittelwerte über ${k.schlaf_dauer.length} Nächte.` };
+      }
+      return { werte, serien: [{ name: "Schlafdauer", daten: w_(k.schlaf_dauer), slot: 1, format: (v) => dauer(v * 3600), endFormat: std, endWert: true }],
+        opt: { yFormat: (v) => `${achsenZahl(v)} h`, wochen } };
+    } })));
+    knoten.push(h("div", { class: "abschnitt raster zwei" },
+      await verlauf({ id: "schlafscore", titel: "Schlafscore", laden: async ({ von, wochen }) => {
+        const r = await kennzahl("schlaf_score", von);
+        return { serien: [{ name: "Schlafscore", daten: wochen ? nachWochen(r) : r, slot: 1, endWert: true }], werte: statistik(r), opt: { yMax: 100, wochen } };
+      } }),
+      await verlauf({ id: "schlafbedarf", titel: "Dauer und Bedarf", laden: async ({ von, wochen }) => {
+        const k = await kennzahlen(["schlaf_dauer", "schlaf_bedarf"], von);
+        const w_ = (r) => (wochen ? nachWochen(r) : r);
+        return { serien: [
+          { name: "Geschlafen", daten: w_(k.schlaf_dauer), slot: 1, format: (v) => dauer(v * 3600), endFormat: std, endWert: true },
+          k.schlaf_bedarf.length ? { name: "Bedarf laut Garmin", daten: w_(k.schlaf_bedarf), slot: 2, format: (v) => dauer(v * 3600) } : null].filter(Boolean),
+          opt: { yFormat: (v) => `${achsenZahl(v)} h`, wochen } };
+      } })));
+  }
+  const nachtIds = [["schlaf_atem", 1], ["schlaf_spo2", 0], ["schlaf_haut", 1], ["schlaf_bb", 0]];
+  const vorhanden = [];
+  for (const [id, st] of nachtIds) if ((await kennzahl(id, isoMinus(365))).length) vorhanden.push([id, st]);
+  if (vorhanden.length) {
+    knoten.push(abschnitt("Werte in der Nacht", null, await verlauf({ id: "nachtwerte", auswahl: vorhanden.map(([id]) => ({ id, name: K[id][0].replace(" im Schlaf", "").replace(" (Abweichung)", "").replace(" aufgeladen", "") })),
+      laden: async ({ von, wochen, wahl }) => {
+        const st = vorhanden.find((x) => x[0] === wahl)[1];
+        const [name, einheit] = K[wahl];
+        const r = await kennzahl(wahl, von);
+        return { serien: [{ name, daten: wochen ? nachWochen(r) : r, slot: 1, stellen: st, einheit, endWert: true }], werte: statistik(r, st, einheit), opt: { wochen },
+          fussnote: wahl === "schlaf_haut" ? "Abweichung von deinem üblichen Wert." : null };
+      } })));
+  }
+  // ---- Erholung: Stress und Body Battery
+  const hatStress = (await kennzahl("stress", isoMinus(365))).length > 0, hatBB = (await kennzahl("bb_hoch", isoMinus(365))).length > 0;
+  if (hatStress || hatBB) {
+    knoten.push(abschnitt("Stress und Body Battery", "Tageswerte von Garmin, ab 6 Monaten als Wochenmittel.", h("div", { class: "raster zwei" },
+      hatStress ? await verlauf({ id: "stress", titel: "Stress im Tagesmittel", laden: async ({ von, wochen }) => {
+        const r = await kennzahl("stress", von);
+        return { serien: [{ name: "Stress", daten: wochen ? nachWochen(r) : r, slot: 1, endWert: true }], werte: statistik(r), opt: { yMin: 0, wochen }, fussnote: "Skala 0 bis 100; unter 26 gilt als ruhig." };
+      } }) : null,
+      hatBB ? await verlauf({ id: "bodybattery", titel: "Body Battery", laden: async ({ von, wochen }) => {
+        const k = await kennzahlen(["bb_hoch", "bb_tief"], von);
+        const w_ = (r) => (wochen ? nachWochen(r) : r);
+        return { serien: [{ name: "Höchstwert", daten: w_(k.bb_hoch), slot: 1, endWert: true }, { name: "Tiefstwert", daten: w_(k.bb_tief), slot: 2, endWert: true }].filter((x) => x.daten.length),
+          werte: [statistik(k.bb_hoch)[0] ? { ...statistik(k.bb_hoch)[0], name: "Mittel Höchstwert" } : null, statistik(k.bb_tief)[0] ? { ...statistik(k.bb_tief)[0], name: "Mittel Tiefstwert" } : null],
+          opt: { yMin: 0, yMax: 100, yIntervall: 25, wochen } };
+      } }) : null)));
+  }
+  return { titel: "Schlaf", knoten };
+}
+
+// ======================================================================
+// Ansicht: Sport
+// ======================================================================
+let sportFilter = "alle";
+async function ansichtSport() {
+  const [akt, info, wTrain] = await Promise.all([Daten.aktivitaeten(), Daten.info("garmin"), Daten.withingsTrainings()]);
+  const k = await kennzahlen(["schritte", "im_mod", "etagen", "aktivkcal", "vo2lauf", "vo2rad", "bereitschaft",
+    "fitnessalter", "last_akut", "wochenlast", "p5k", "ausdauer", "huegel"], isoMinus(364));
+  const tsText = await Daten.texte("g.trainingsstatus.trainingStatusFeedbackPhrase", isoMinus(60));
+  const bereitText = await Daten.texte("g.bereitschaft.level", isoMinus(10));
+  const knoten = [];
+
+  // Kacheln
+  const kacheln = [];
+  const kz = (id, titel, stellen, unter) => { const l = letzter(k[id]); if (l) kacheln.push(kachel({ titel, wert: zahl(l[1], stellen), funkeDaten: k[id].filter((p_) => p_[0] >= isoMinus(90)), unter: unter ? unter(l) : "" })); };
+  kz("vo2lauf", "VO₂max Laufen", 1, (l) => deltaText(l[1], vorTagen(k.vo2lauf, 90), 1, "", "in 90 Tagen"));
+  kz("vo2rad", "VO₂max Radfahren", 1, (l) => deltaText(l[1], vorTagen(k.vo2rad, 90), 1, "", "in 90 Tagen"));
+  kz("bereitschaft", "Trainingsbereitschaft", 0, () => (letzter(bereitText) ? textDeutsch(letzter(bereitText)[1]) : ""));
+  if (letzter(tsText)) kacheln.push(kachel({ titel: "Trainingsstatus", wert: textDeutsch(letzter(tsText)[1]), unter: `Stand ${datum(letzter(tsText)[0], "kurz")}` }));
+  kz("wochenlast", "Wochenlast", 0);
+  kz("fitnessalter", "Fitnessalter", 1, (l) => deltaText(l[1], vorTagen(k.fitnessalter, 90), 1, "Jahre", "in 90 Tagen"));
+  if (kacheln.length) knoten.push(h("div", { class: "kacheln", style: { marginTop: "6px" } }, kacheln));
+
+  // Aktivitätenliste mit eigenem Zeitraum
+  const gruppenNamen = { lauf: "Laufen", fahrrad: "Radfahren", kraft: "Kraft & Fitness", wandern: "Wandern & Berg", gehen: "Gehen", schwimmen: "Wasser", yoga: "Yoga & Atem", sonst: "Sonstiges" };
+  const zrListe = [...ZEITRAEUME, ZR_ALLE];
+  let zr = zrGewaehlt("aktivitaeten", "30", zrListe.map((x) => x[0]));
+  const segBox = h("div", { class: "segmente zr", role: "group", "aria-label": "Zeitraum der Aktivitäten" });
+  const listeBox = h("div");
+  const chipsBox = h("div", { class: "chips", role: "group", "aria-label": "Sportart" });
+  let anzahl = 15;
+  const zeigeListe = () => {
+    segBox.replaceChildren(...zrListe.map(([z, kurz, lang]) => h("button", { type: "button", "aria-pressed": String(z === zr), "aria-label": lang, title: lang,
+      onclick: () => { zr = z; zrMerken("aktivitaeten", z); anzahl = 15; zeigeListe(); } }, kurz)));
+    const von = zrVon(zr);
+    const imZeitraum = akt.filter((a_) => !von || String(a_.start).slice(0, 10) >= von);
+    const typen = [...new Set(imZeitraum.map((a_) => sportIcon(a_.typ)))];
+    if (!typen.includes(sportFilter)) sportFilter = "alle";
+    chipsBox.replaceChildren(...[["alle", "Alle"], ...typen.map((t_) => [t_, gruppenNamen[t_] || t_])].map(([t_, n]) =>
+      h("button", { type: "button", "aria-pressed": String(sportFilter === t_), onclick: () => { sportFilter = t_; anzahl = 15; zeigeListe(); } }, n)));
+    const gefiltert = imZeitraum.filter((a_) => sportFilter === "alle" || sportIcon(a_.typ) === sportFilter);
+    const ul = h("ul", { class: "liste" });
+    let monat = "";
+    for (const a_ of gefiltert.slice(0, anzahl)) {
+      const m = String(a_.start).slice(0, 7);
+      if (m !== monat) { monat = m; ul.append(h("li", { class: "monat" }, DF.monat.format(new Date(tagMs(m + "-01"))))); }
+      ul.append(h("li", null, aktivitaetZeile(a_)));
+    }
+    const summe = gefiltert.reduce((x, a_) => ({ n: x.n + 1, km: x.km + (a_.distanz || 0) / 1000, h: x.h + (a_.dauer || 0) / 3600 }), { n: 0, km: 0, h: 0 });
+    const mehr = gefiltert.length > anzahl
+      ? h("div", { class: "knopf-zeile" }, h("button", { type: "button", class: "knopf zweit", onclick: () => { anzahl += 30; zeigeListe(); } },
+        `Weitere anzeigen (${zahl(gefiltert.length - anzahl)} übrig)`)) : null;
+    listeBox.replaceChildren(...[
+      kennzahlenZeile([{ name: "Aktivitäten", wert: zahl(summe.n) }, { name: "Strecke", wert: zahl(summe.km), einheit: "km" }, { name: "Zeit", wert: zahl(summe.h), einheit: "Std." }]),
+      h("div", { style: { marginTop: "10px" } }, gefiltert.length ? ul : leer(`Keine Aktivität ${ZR_IN[zr]}`, zr === "alle" ? "" : "Wähle oben einen längeren Zeitraum.")), mehr].filter(Boolean));
+  };
+  zeigeListe();
+  knoten.push(abschnitt("Aktivitäten", null, h("div", { class: "verlauf" }, h("div", { class: "verlauf-kopf" }, segBox), chipsBox, listeBox)));
+  if (wTrain.length) {
+    knoten.push(abschnitt("Trainings aus Withings", null, h("ul", { class: "liste" }, wTrain.slice(0, 50).map((t_) =>
+      h("li", null, h("div", { class: "zeile" }, h("span", { class: "symbol" }, icon("sonst")),
+        h("span", { class: "haupt" }, h("b", null, `Training (Kategorie ${t_.kategorie})`), h("span", null, DF.datumZeit.format(new Date(t_.start * 1000)))),
+        h("span", { class: "kennzahlen" }, h("div", null, h("b", null, dauer((t_.ende - t_.start), false)), h("span", null, "Dauer")))))))));
+  }
+
+  // Bewegung im Alltag
+  const balkenTage = (r, wochen) => (wochen ? nachWochen(r) : r);
+  const tausender = (v) => (v >= 1000 ? `${zahl(v / 1000)}k` : zahl(v));
+  if (k.schritte.length) {
+    knoten.push(abschnitt("Bewegung im Alltag", "Bis 3 Monate je Tag, ab 6 Monaten als Mittel pro Tag in der Woche.", h("div", { class: "raster zwei" },
+      await verlauf({ id: "schritte", titel: "Schritte", laden: async ({ von, wochen }) => {
+        const [r, ziele] = await Promise.all([kennzahl("schritte", von), kennzahl("schrittziel", isoMinus(30))]);
+        const ziel = letzter(ziele)?.[1];
+        return { serien: [{ name: wochen ? "Schritte pro Tag (Wochenmittel)" : "Schritte", daten: balkenTage(r, wochen), slot: 1, art: "balken" }],
+          werte: [...statistik(r).slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), ziel ? { name: "Tage am Ziel", wert: `${zahl(r.filter((p_) => p_[1] >= ziel).length)} von ${zahl(r.length)}` } : null],
+          opt: { nullBasis: true, wochen, referenzen: ziel ? [{ wert: ziel, text: `Ziel ${zahl(ziel)}` }] : [], yFormat: tausender } };
+      } }),
+      k.im_mod.length ? await verlauf({ id: "intensitaet", titel: "Intensitätsminuten", laden: async ({ von, tage }) => {
+        const kk = await kennzahlen(["im_mod", "im_int"], von);
+        const int = new Map(kk.im_int);
+        const taeglich = kk.im_mod.map(([d, v]) => [d, v + 2 * (int.get(d) || 0)]);
+        const woechentlich = (tage == null || tage > 30);
+        const daten = woechentlich ? nachWochen(taeglich, "summe") : taeglich;
+        return { serien: [{ name: woechentlich ? "Minuten pro Woche" : "Minuten pro Tag", daten, slot: 1, art: "balken", einheit: "Min." }],
+          werte: [{ name: "Mittel pro Woche", wert: zahl(mittel(nachWochen(taeglich, "summe").map((p_) => p_[1]))), einheit: "Min." }],
+          opt: { nullBasis: true, wochen: woechentlich, referenzen: woechentlich ? [{ wert: 150, text: "Ziel 150" }] : [] },
+          fussnote: "Minuten mit hoher Intensität zählen doppelt, wie bei Garmin. Ziel laut WHO: 150 Minuten pro Woche." };
+      } }) : null,
+      k.etagen.length ? await verlauf({ id: "etagen", titel: "Etagen", hoehe: "klein", laden: async ({ von, wochen }) => {
+        const r = await kennzahl("etagen", von);
+        return { serien: [{ name: "Etagen", daten: balkenTage(r, wochen), slot: 1, art: "balken" }], werte: statistik(r).slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), opt: { nullBasis: true, rechts: 12, wochen } };
+      } }) : null,
+      k.aktivkcal.length ? await verlauf({ id: "aktivkcal", titel: "Aktivkalorien", hoehe: "klein", laden: async ({ von, wochen }) => {
+        const r = await kennzahl("aktivkcal", von);
+        return { serien: [{ name: "Aktivkalorien", daten: balkenTage(r, wochen), slot: 1, art: "balken", einheit: "kcal" }], werte: statistik(r, 0, "kcal").slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), opt: { nullBasis: true, rechts: 12, wochen } };
+      } }) : null)));
+  }
+
+  // Form und Leistung
+  const form = [];
+  const linie = (id, titel, ids, opt = {}, fussnote = null, mitMittel = false) => verlauf({ id, titel, standard: "91", laden: async ({ von, wochen }) => {
+    const kk = await kennzahlen(ids.map((x) => x[0]), von);
+    const serien = ids.map(([kid, name, slot, extra]) => (kk[kid].length ? { name, daten: wochen ? nachWochen(kk[kid]) : kk[kid], slot, endWert: true, verbinden: true, ...(extra || {}) } : null)).filter(Boolean);
+    const erste = kk[ids[0][0]];
+    return { serien, opt: { wochen, ...opt }, fussnote,
+      werte: erste.length ? [{ name: "Zuletzt", wert: ids[0][3] && ids[0][3].format ? ids[0][3].format(letzter(erste)[1]) : zahl(letzter(erste)[1], ids[0][3]?.stellen ?? 0) },
+        ids[0][3] && ids[0][3].format ? null : mitMittel ? statistik(erste, ids[0][3]?.stellen ?? 0)[0] : veraenderung(erste, ids[0][3]?.stellen ?? 0, "")] : [] };
+  } });
+  if (k.vo2lauf.length || k.vo2rad.length) form.push(await linie("vo2max", "VO₂max", [["vo2lauf", "Laufen", 1, { stellen: 1 }], ["vo2rad", "Radfahren", 2, { stellen: 1 }]].filter(([id]) => k[id].length), { yStellen: 0 }));
+  if (k.bereitschaft.length) form.push(await linie("bereitschaft", "Trainingsbereitschaft", [["bereitschaft", "Bereitschaft", 1]], { yMin: 0, yMax: 100, yIntervall: 25 }, null, true));
+  if (k.last_akut.length) form.push(await linie("trainingslast", "Trainingslast", [["last_akut", "Akut (7 Tage)", 1], ["last_chronisch", "Chronisch (28 Tage)", 2]], {}, null, true));
+  if (k.p5k.length) form.push(await linie("prognose", "Wettkampfprognose", [["p5k", "5 km", 1, { format: zeitText }], ["p10k", "10 km", 2, { format: zeitText }]], { yFormat: (v) => zeitText(v) }, "Kürzere Zeit ist besser."));
+  if (k.ausdauer.length) form.push(await linie("ausdauer", "Ausdauerwert", [["ausdauer", "Ausdauerwert", 1]]));
+  if (k.huegel.length) form.push(await linie("huegel", "Hill Score", [["huegel", "Hill Score", 1]]));
+  if (k.fitnessalter.length) form.push(await linie("fitnessalter", "Fitnessalter", [["fitnessalter", "Fitnessalter", 1, { stellen: 1 }]], { yStellen: 0 }));
+  if (form.length) knoten.push(abschnitt("Form und Leistung", null, h("div", { class: "raster zwei" }, form)));
+
+  // Prognose, Rekorde, Zonen
+  const extras = [];
+  const prog = info.prognose;
+  if (prog && (prog.time5K || prog.time10K)) {
+    extras.push(h("div", null, h("h3", { style: { marginBottom: "8px" } }, "Aktuelle Prognose"), werteListe([
+      prog.time5K ? { name: "5 km", wert: zeitText(prog.time5K) } : null, prog.time10K ? { name: "10 km", wert: zeitText(prog.time10K) } : null,
+      prog.timeHalfMarathon ? { name: "Halbmarathon", wert: zeitText(prog.timeHalfMarathon) } : null, prog.timeMarathon ? { name: "Marathon", wert: zeitText(prog.timeMarathon) } : null])));
+  }
+  const rekorde = Array.isArray(info.rekorde) ? info.rekorde : [];
+  if (rekorde.length) {
+    const PR = { 1: ["1 km", "zeit"], 2: ["1 Meile", "zeit"], 3: ["5 km", "zeit"], 4: ["10 km", "zeit"], 5: ["Halbmarathon", "zeit"], 6: ["Marathon", "zeit"], 7: ["Längster Lauf", "strecke"] };
+    extras.push(h("div", null, h("h3", { style: { marginBottom: "8px" } }, "Bestleistungen"), h("table", { class: "tabelle" },
+      h("tbody", null, rekorde.map((r) => {
+        const [name, art] = PR[r.typeId] || [`${sportName(r.activityType)} (Rekord ${r.typeId})`, "roh"];
+        const wert = art === "zeit" ? zeitText(r.value) : art === "strecke" ? `${zahl(r.value / 1000, 1)} km` : zahl(r.value);
+        const wann = r.prStartTimeGmtFormatted || r.prStartTimeLocalFormatted;
+        return h("tr", null, h("td", { class: "text" }, name), h("td", null, wert), h("td", null, wann ? datum(String(wann).slice(0, 10), "kurz") : ""));
+      })))));
+  }
+  const zonen = Array.isArray(info.hf_zonen) ? info.hf_zonen.find((z) => z.sport === "DEFAULT") || info.hf_zonen[0] : null;
+  const laktat = info.laktat && info.laktat.speed_and_heart_rate;
+  if (zonen) {
+    const grenzen = [zonen.zone1Floor, zonen.zone2Floor, zonen.zone3Floor, zonen.zone4Floor, zonen.zone5Floor, zonen.maxHeartRateUsed];
+    extras.push(h("div", null, h("h3", { style: { marginBottom: "8px" } }, "Herzfrequenzzonen"), h("table", { class: "tabelle" },
+      h("tbody", null, [1, 2, 3, 4, 5].map((z) => h("tr", null, h("td", null, h("span", { class: "chip", style: { "--c": css(`--zone-${z}`) } }, `Zone ${z}`)), h("td", null, `${grenzen[z - 1] ?? "–"}–${grenzen[z] ?? "–"} bpm`))))),
+      werteListe([zonen.restingHeartRateUsed ? { name: "Ruhepuls dafür", wert: zahl(zonen.restingHeartRateUsed), einheit: "bpm" } : null,
+        laktat && laktat.heartRate ? { name: "Laktatschwelle", wert: zahl(laktat.heartRate), einheit: "bpm", neben: laktat.speed ? `Tempo ${tempoText(laktat.speed * 10, true)} min/km` : "" } : null])));
+  }
+  if (extras.length) knoten.push(abschnitt("Prognose, Rekorde und Zonen", null, h("div", { class: "raster drei" }, extras)));
+  return { titel: "Sport", knoten };
+}
+
+// ======================================================================
+// Ansicht: eine Aktivität
+// ======================================================================
+let LEAFLET = null;
+function leafletLaden() {
+  if (window.L) return Promise.resolve();
+  if (!LEAFLET) {
+    LEAFLET = new Promise((ok, fehler) => {
+      document.head.append(h("link", { rel: "stylesheet", href: "vendor/leaflet.css" }));
+      const sk = h("script", { src: "vendor/leaflet.js" });
+      sk.onload = ok; sk.onerror = fehler;
+      document.head.append(sk);
+    });
+  }
+  return LEAFLET;
+}
+let KARTE = null;
+async function ansichtAktivitaet(id) {
+  const liste = await Daten.aktivitaeten();
+  const a = liste.find((x) => String(x.id) === String(id));
+  if (!a) return { titel: "Aktivität", zurueck: "#sport", knoten: [leer("Aktivität nicht gefunden", "")] };
+  const det = a.det ? await Daten.datei(`d/akt/${id}.enc`) : null;
+  const laufen = istLauf(a.typ);
+  const knoten = [h("p", { class: "leise", style: { marginTop: "6px" } }, `${sportName(a.typ)}, ${datum(a.start.slice(0, 10), "langJahr")}, ${a.start.slice(11, 16)} Uhr`)];
+  knoten.push(h("div", { class: "abschnitt" }, werteListe([
+    a.distanz ? { name: "Strecke", wert: zahl(a.distanz / 1000, 2), einheit: "km" } : null,
+    { name: "Dauer", wert: zeitText(a.dauer), neben: a.bewegt && Math.abs(a.bewegt - a.dauer) > 60 ? `in Bewegung ${zeitText(a.bewegt)}` : "" },
+    a.tempo && a.distanz ? { name: laufen ? "Tempo" : "Geschwindigkeit", wert: tempoText(a.tempo, laufen), einheit: laufen ? "min/km" : "km/h", neben: a.tempo_max ? `max. ${tempoText(a.tempo_max, laufen)}` : "" } : null,
+    a.hf ? { name: "Puls im Mittel", wert: zahl(a.hf), einheit: "bpm", neben: a.hf_max ? `max. ${zahl(a.hf_max)}` : "" } : null,
+    a.auf != null ? { name: "Anstieg", wert: zahl(a.auf), einheit: "m", neben: a.ab != null ? `Abstieg ${zahl(a.ab)} m` : "" } : null,
+    a.kcal ? { name: "Kalorien", wert: zahl(a.kcal), einheit: "kcal" } : null,
+    a.te_a != null ? { name: "Trainingseffekt aerob", wert: zahl(a.te_a, 1), neben: a.te_an != null ? `anaerob ${zahl(a.te_an, 1)}` : "" } : null,
+    a.last != null ? { name: "Trainingslast", wert: zahl(a.last) } : null,
+    a.leistung ? { name: "Leistung im Mittel", wert: zahl(a.leistung), einheit: "W", neben: a.np ? `normiert ${zahl(a.np)} W` : "" } : null,
+    a.kad_lauf ? { name: "Schrittfrequenz", wert: zahl(a.kad_lauf), einheit: "spm" } : a.kad_rad ? { name: "Trittfrequenz", wert: zahl(a.kad_rad), einheit: "rpm" } : null,
+    a.schritte ? { name: "Schritte", wert: zahl(a.schritte) } : null,
+    a.saetze ? { name: "Sätze", wert: zahl(a.saetze), neben: a.wdh ? `${zahl(a.wdh)} Wiederholungen` : "" } : null,
+    a.bb != null ? { name: "Body Battery", wert: vorzeichen(a.bb) } : null,
+    a.schweiss ? { name: "Schweißverlust", wert: zahl(a.schweiss), einheit: "ml" } : null,
+    a.vo2 ? { name: "VO₂max danach", wert: zahl(a.vo2) } : null,
+    a.temp_max != null ? { name: "Temperatur", wert: `${zahl(a.temp_min ?? a.temp_max)}–${zahl(a.temp_max)}`, einheit: "°C" } : null,
+  ])));
+  if (det && det.track && det.track.length > 1) {
+    const karte = h("div", { class: "karte", role: "region", "aria-label": "Karte der Strecke" });
+    knoten.push(h("div", { class: "abschnitt" }, karte));
+    NACH.push(async () => {
+      try { await leafletLaden(); } catch { karte.replaceChildren(leer("Karte nicht verfügbar", "Ohne Internetverbindung kann die Karte nicht geladen werden.")); return; }
+      KARTE = L.map(karte, { zoomControl: true, attributionControl: true, scrollWheelZoom: false });
+      KARTE.attributionControl.setPrefix("Leaflet");
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(KARTE);
+      const linie = L.polyline(det.track, { color: farbe(1), weight: 4, opacity: 0.95, lineJoin: "round" }).addTo(KARTE);
+      L.circleMarker(det.track[0], { radius: 6, color: css("--tinte"), weight: 2, fillColor: css("--blatt"), fillOpacity: 1 }).addTo(KARTE).bindTooltip("Start");
+      L.circleMarker(det.track[det.track.length - 1], { radius: 6, color: css("--blatt"), weight: 2, fillColor: css("--tinte"), fillOpacity: 1 }).addTo(KARTE).bindTooltip("Ziel");
+      KARTE.fitBounds(linie.getBounds(), { padding: [18, 18] });
+    });
+  }
+  if (det && det.reihen) {
+    const r = det.reihen;
+    const nachStrecke = r.s && r.s.some((v) => v);
+    const x = nachStrecke ? r.s.map((v) => (v == null ? null : v / 1000)) : (r.t || []).map((v) => (v == null ? null : v / 60));
+    const reihe = (werte, f = (v) => v) => (werte || []).map((v, i) => [x[i], v == null ? null : f(v)]).filter((p) => p[0] != null);
+    const kurven = [];
+    if (r.hf) kurven.push(["Puls", reihe(r.hf), "bpm", 0]);
+    if (r.v) kurven.push(laufen ? ["Tempo", reihe(r.v, (v) => (v > 0.5 ? 1000 / v / 60 : null)), "min/km", 2, true] : ["Geschwindigkeit", reihe(r.v, (v) => v * 3.6), "km/h", 1]);
+    if (r.h) kurven.push(["Höhe", reihe(r.h), "m", 0]);
+    if (r.kad) kurven.push([laufen ? "Schrittfrequenz" : "Trittfrequenz", reihe(r.kad), laufen ? "spm" : "rpm", 0]);
+    if (r.p) kurven.push(["Leistung", reihe(r.p), "W", 0]);
+    if (kurven.length) {
+      knoten.push(abschnitt("Verlauf", nachStrecke ? "Über die Strecke in Kilometern." : "Über die Zeit in Minuten.", h("div", { class: "raster zwei" }, kurven.map(([name, daten, einheit, st, umgekehrt]) =>
+        figur({ titel: name, hoehe: "klein", serien: [{ name, daten, slot: 1, einheit, stellen: st, punkte: false, format: umgekehrt ? (v) => `${Math.floor(v)}:${zweistellig(Math.round((v % 1) * 60) % 60)} min/km` : undefined }],
+          zeichnen: (div) => wertDiagramm(div, name, daten, einheit, st, nachStrecke ? "km" : "min", umgekehrt),
+          tabelle: () => h("table", { class: "tabelle" }, h("thead", null, h("tr", null, h("th", null, nachStrecke ? "km" : "Minute"), h("th", null, `${name} (${einheit})`))),
+            h("tbody", null, daten.filter((_, i) => i % 5 === 0).map((p) => h("tr", null, h("td", null, zahl(p[0], 2)), h("td", null, p[1] == null ? "–" : zahl(p[1], st)))))) })))));
+    }
+  }
+  if (a.zonen || (det && det.zonen && det.zonen.length)) {
+    const sek = det && det.zonen && det.zonen.length ? det.zonen.map((z) => z[1]) : a.zonen;
+    const summe = sek.reduce((x, y) => x + (y || 0), 0) || 1;
+    knoten.push(abschnitt("Zeit in den Pulszonen", null, h("div", { class: "zonen" }, sek.map((v, i) =>
+      h("div", { style: { display: "grid", gridTemplateColumns: "64px 1fr 72px", alignItems: "center", gap: "10px", margin: "6px 0" } },
+        h("span", { class: "leise" }, `Zone ${i + 1}`),
+        h("div", { style: { height: "18px", background: "var(--wash)", borderRadius: "4px" } }, h("div", { style: { width: `${(v / summe) * 100}%`, height: "100%", background: css(`--zone-${i + 1}`), borderRadius: "0 4px 4px 0", minWidth: v ? "2px" : "0" } })),
+        h("span", { class: "zahlen", style: { textAlign: "right" } }, dauer(v)))))));
+  }
+  if (det && det.runden && det.runden.length > 1) {
+    knoten.push(abschnitt("Runden", null, h("div", { class: "tabellen-rahmen", style: { maxHeight: "460px" } }, h("table", { class: "tabelle" },
+      h("thead", null, h("tr", null, h("th", null, "Runde"), h("th", null, "Strecke"), h("th", null, "Zeit"), h("th", null, laufen ? "Tempo" : "km/h"), h("th", null, "Puls"), h("th", null, "Anstieg"))),
+      h("tbody", null, det.runden.map((r, i) => h("tr", null, h("td", null, i + 1), h("td", null, r.s ? `${zahl(r.s / 1000, 2)} km` : "–"), h("td", null, zeitText(r.t)),
+        h("td", null, r.v ? tempoText(r.v, laufen) : "–"), h("td", null, r.hf ? zahl(r.hf) : "–"), h("td", null, r.auf != null ? `${zahl(r.auf)} m` : "–"))))))));
+  }
+  if (!det && !a.det) knoten.push(hinweis("Karte und Verlauf dieser Aktivität werden beim nächsten Abruf geladen."));
+  return { titel: a.name || sportName(a.typ), zurueck: "#sport", knoten };
+}
+function wertDiagramm(div, name, daten, einheit, stellen, xEinheit, umgekehrt) {
+  const c = farbe(1);
+  return neuesDiagramm(div, {
+    animation: BEWEGUNG, grid: { left: 4, right: 12, top: 10, bottom: 4, containLabel: true },
+    xAxis: { type: "value", min: "dataMin", max: "dataMax", axisLine: { lineStyle: { color: css("--linie-stark") } }, axisTick: { show: false },
+      axisLabel: { ...textStil(), formatter: achsenZahl }, splitLine: { show: false },
+      axisPointer: { show: true, type: "line", lineStyle: { color: css("--tinte-3") }, label: { show: false } } },
+    yAxis: { type: "value", scale: true, inverse: Boolean(umgekehrt), splitNumber: 3, axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: { ...textStil(), formatter: (v) => (umgekehrt ? `${Math.floor(v)}:${zweistellig(Math.round((v % 1) * 60) % 60)}` : zahl(v, stellen > 1 ? 1 : stellen)) },
+      splitLine: { lineStyle: { color: css("--linie") } } },
+    tooltip: { trigger: "axis", ...tooltipStil(), formatter: (p) => {
+      const v = p[0].value[1];
+      const t = v == null ? "–" : umgekehrt ? `${Math.floor(v)}:${zweistellig(Math.round((v % 1) * 60) % 60)} min/km` : `${zahl(v, stellen)} ${einheit}`;
+      return `<div style="color:${css("--tinte-2")};font-size:12px">${zahl(p[0].value[0], 2)} ${xEinheit}</div>${tooltipZeile(c, t, name)}`; } },
+    series: [{ type: "line", data: daten, showSymbol: false, connectNulls: false, lineStyle: { width: 2, color: c }, itemStyle: { color: c },
+      areaStyle: umgekehrt ? undefined : { color: c, opacity: 0.08 }, sampling: "lttb" }],
+  });
+}
+
+// ======================================================================
+// Ansicht: Tag
+// ======================================================================
+async function ansichtTag(iso) {
+  const heute = heuteIso();
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) iso = heute;
+  const [tag, tw, w, akt] = await Promise.all([Daten.tag(iso), Daten.tageswerte(iso), Daten.withings(), Daten.aktivitaeten()]);
+  const geh = (d) => { location.hash = `#tag/${d}`; };
+  const eingabe = h("input", { type: "date", value: iso, max: heute, "aria-label": "Datum", onchange: (e) => e.target.value && geh(e.target.value) });
+  const knoten = [h("div", { class: "filterzeile" }, h("div", { class: "tag-navi" },
+    h("button", { type: "button", "aria-label": "Vorheriger Tag", onclick: () => geh(isoPlus(iso, -1)) }, icon("zurueck", 20)),
+    eingabe,
+    h("button", { type: "button", "aria-label": "Nächster Tag", disabled: iso >= heute, onclick: () => geh(isoPlus(iso, 1)) }, icon("vor", 20))))];
+  knoten.push(h("p", { class: "leise", style: { margin: "6px 0 0" } }, datum(iso, "langJahr")));
+  const bereich = [tagMs(iso), tagMs(iso) + 86400000];
+  if (tag) {
+    const kurven = [];
+    if (tag.schlaf && tag.schlaf.phasen && tag.schlaf.phasen.length) kurven.push(schlafphasenFigur(tag.schlaf, "Schlaf der Nacht"));
+    const opt = { mitUhrzeit: true, spanne: 1, xMin: bereich[0], xMax: bereich[1], rechts: 12 };
+    if (tag.hf && tag.hf.length) kurven.push(figur({ titel: "Herzfrequenz", wert: tag.hf_info && tag.hf_info.restingHeartRate ? h("span", null, "Ruhepuls ", h("b", null, zahl(tag.hf_info.restingHeartRate))) : null,
+      serien: [{ name: "Puls", daten: tag.hf, slot: 1, einheit: "bpm", punkte: false }], opt }));
+    if (tag.stress && tag.stress.length) kurven.push(figur({ titel: "Stress", wert: tag.stress_info && tag.stress_info.avgStressLevel != null ? h("span", null, "Mittel ", h("b", null, zahl(tag.stress_info.avgStressLevel))) : null,
+      serien: [{ name: "Stress", daten: tag.stress, slot: 1, art: "balken", rund: false }], opt: { ...opt, nullBasis: true, yMin: 0, yMax: 100, yIntervall: 25 }, fussnote: "Lücken: Bewegung oder zu wenige Messwerte." }));
+    if (tag.bb && tag.bb.length) kurven.push(figur({ titel: "Body Battery", serien: [{ name: "Body Battery", daten: tag.bb, slot: 1, punkte: false, flaeche: true }], opt: { ...opt, yMin: 0, yMax: 100, yIntervall: 25 } }));
+    if (tag.schritte && tag.schritte.length) kurven.push(figur({ titel: "Schritte", wert: h("span", null, "Summe ", h("b", null, zahl(tag.schritte.reduce((x, p) => x + (p[1] || 0), 0)))),
+      serien: [{ name: "Schritte je 15 Minuten", daten: tag.schritte.map((p) => [p[0], p[1]]), slot: 1, art: "balken" }], opt: { ...opt, nullBasis: true } }));
+    if (tag.atmung && tag.atmung.length) kurven.push(figur({ titel: "Atemfrequenz", hoehe: "klein", serien: [{ name: "Atemfrequenz", daten: tag.atmung, slot: 1, einheit: "/min", stellen: 1, punkte: false }], opt }));
+    if (tag.spo2 && tag.spo2.length) kurven.push(figur({ titel: "SpO₂", hoehe: "klein", serien: [{ name: "SpO₂", daten: tag.spo2, slot: 1, einheit: "%" }], opt }));
+    knoten.push(h("div", { class: "abschnitt raster zwei" }, kurven));
+  } else {
+    knoten.push(h("div", { class: "abschnitt" }, hinweis(iso >= isoMinus(90) ? "Für diesen Tag gibt es (noch) keinen Tagesverlauf. Er wird beim nächsten Abruf geladen." :
+      "Tagesverläufe werden für die letzten 90 Tage und alle neuen Tage gespeichert. Für diesen Tag gibt es die Tageswerte unten.")));
+  }
+  // Withings-Messungen dieses Tages
+  const gruppen = [];
+  for (const [grpid, zeilen] of w._grp) if (isoAusMs(zeilen[0][0] * 1000) === iso) gruppen.push([zeilen[0][0] * 1000, grpid, zeilen]);
+  gruppen.sort((a, b) => a[0] - b[0]);
+  if (gruppen.length) {
+    knoten.push(abschnitt("Messungen", null, h("ul", { class: "liste" }, gruppen.map(([ts, , zeilen]) => {
+      const g = Object.fromEntries(zeilen.filter((r) => r[3] === -1).map((r) => [r[1], r[2]]));
+      const titel = g[10] ? `Blutdruck ${g[10]}/${g[9]} mmHg` : g[1] ? `Gewicht ${zahl(g[1], 1)} kg` : W_TYPEN[zeilen[0][1]]?.[0] || "Messung";
+      const neben = g[10] ? (g[11] ? `Puls ${g[11]}` : "") : g[6] ? `Fett ${zahl(g[6], 1)} %${g[76] ? `, Muskeln ${zahl(g[76], 1)} kg` : ""}` : "";
+      return h("li", null, h("div", { class: "zeile" }, h("span", { class: "symbol" }, icon(g[10] ? "herz" : "koerper")),
+        h("span", { class: "haupt" }, h("b", null, titel), h("span", null, `${uhr(ts)} Uhr${neben ? ", " + neben : ""}`)), h("span")));
+    }))));
+  }
+  const aktTag = akt.filter((a) => String(a.start).slice(0, 10) === iso);
+  if (aktTag.length) knoten.push(abschnitt("Aktivitäten", null, h("ul", { class: "liste" }, aktTag.map((a) => h("li", null, aktivitaetZeile(a))))));
+  // alle Tageswerte
+  const eintraege = Object.entries(tw.werte).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  if (eintraege.length) {
+    const nachBereich = new Map();
+    for (const [m, v] of eintraege) { const b = bereichName(m); if (!nachBereich.has(b)) nachBereich.set(b, []); nachBereich.get(b).push([m, v]); }
+    knoten.push(abschnitt("Alle Tageswerte", `${eintraege.length} Werte an diesem Tag.`, h("div", { class: "tabellen-rahmen", style: { maxHeight: "560px" } }, h("table", { class: "tabelle" },
+      h("tbody", null, [...nachBereich.entries()].map(([b, liste]) => [
+        h("tr", null, h("th", { colspan: 2, style: { textAlign: "left", paddingTop: "14px" } }, b)),
+        liste.map(([m, v]) => h("tr", null, h("td", { class: "text" }, h("a", { href: `#werte/${encodeURIComponent(m)}` }, metrikName(m))), h("td", null, zahl(v, Number.isInteger(v) ? 0 : 1)))),
+      ]))))));
+  }
+  if (!tag && !gruppen.length && !aktTag.length && !eintraege.length) knoten.push(leer("Keine Daten an diesem Tag", ""));
+  return { titel: iso === heute ? "Heute im Detail" : "Tag im Detail", knoten };
+}
+
+// ======================================================================
+// Ansicht: Alle Werte
+// ======================================================================
+async function ansichtWerte(metrik) {
+  if (metrik) return ansichtMetrik(decodeURIComponent(metrik));
+  const [kat, w] = await Promise.all([Daten.katalog(), Daten.withings()]);
+  const eintraege = [];
+  for (const [k_, zeilen] of w._typ) {
+    const [typ, pos] = k_.split("|").map(Number);
+    const id = pos >= 0 ? `w.mess.${typ}.${pos}` : `w.mess.${typ}`;
+    eintraege.push({ id, name: wName(typ, pos), bereich: "Withings – Messungen", n: zeilen.length, bis: isoAusMs(Math.max(...zeilen.map((r) => r[0])) * 1000) });
+  }
+  for (const [m, [n, , bis]] of Object.entries(kat.werte || {})) eintraege.push({ id: m, name: metrikName(m), bereich: bereichName(m), n, bis });
+  const suche = h("input", { class: "suche", type: "search", placeholder: "Wert suchen, z. B. Puls oder Schlaf", "aria-label": "Werte durchsuchen" });
+  const box = h("div");
+  const zeige = () => {
+    const q = suche.value.trim().toLowerCase();
+    const treffer = eintraege.filter((e) => !q || e.name.toLowerCase().includes(q) || e.bereich.toLowerCase().includes(q) || e.id.toLowerCase().includes(q));
+    const gruppen = new Map();
+    for (const e of treffer) { if (!gruppen.has(e.bereich)) gruppen.set(e.bereich, []); gruppen.get(e.bereich).push(e); }
+    const reihenfolge = [...gruppen.keys()].sort((a, b) => (a.startsWith("Withings") === b.startsWith("Withings") ? a.localeCompare(b, "de") : a.startsWith("Withings") ? -1 : 1));
+    box.replaceChildren(...reihenfolge.map((b) => h("div", null, h("h3", { class: "gruppe-titel" }, b),
+      h("div", { class: "wertliste" }, gruppen.get(b).sort((x, y) => x.name.localeCompare(y.name, "de")).map((e) =>
+        h("a", { href: `#werte/${encodeURIComponent(e.id)}` }, h("b", { style: { fontWeight: 500 } }, e.name), h("span", null, `${zahl(e.n)} Werte, bis ${datum(e.bis, "kurz")}`)))))),
+      treffer.length ? "" : leer("Nichts gefunden", "Versuche einen anderen Begriff."));
+  };
+  suche.addEventListener("input", zeige);
+  zeige();
+  return { titel: "Alle Werte", knoten: [h("p", { class: "leise", style: { margin: "6px 0 14px" } }, `${eintraege.length} Messgrößen aus Withings und Garmin. Alles, was die Dienste liefern, ist hier abrufbar.`), suche, box] };
+}
+async function ansichtMetrik(m) {
+  let alle, name = metrikName(m), einheit = "", stellen = 1, mitUhrzeit = false;
+  if (m.startsWith("w.mess.")) {
+    const [, , typ, pos] = m.split(".");
+    const w = await Daten.withings();
+    const t_ = W_TYPEN[+typ] || [name, "", 1];
+    einheit = t_[1]; stellen = t_[2];
+    alle = wReihe(w, +typ, pos == null ? -1 : +pos).map((p_) => [p_[0], p_[1]]);
+    mitUhrzeit = true;
+  } else {
+    alle = await Daten.reihe(m);
+    stellen = alle.some((p_) => !Number.isInteger(p_[1])) ? 1 : 0;
+  }
+  const knoten = [h("p", { class: "leise", style: { margin: "4px 0 0" } }, bereichName(m))];
+  if (!alle.length) { knoten.push(leer("Noch keine Werte", "")); return { titel: name, zurueck: "#werte", knoten }; }
+  const daten = alle;
+  const l = alle[alle.length - 1];
+  knoten.push(h("div", { class: "abschnitt" },
+    werteListe([{ name: "Zuletzt", wert: zahl(l[1], stellen), einheit, neben: mitUhrzeit ? DF.datumZeit.format(new Date(l[0])) : datum(l[0], "kurz") }]),
+    h("div", { style: { marginTop: "14px" } }, await verlauf({ id: "metrik", mitAlle: true, hoehe: "gross", laden: ({ von, wochen }) => {
+      const roh = imBereich(alle, von);
+      return { serien: [{ name, daten: wochen ? nachWochen(roh) : roh, slot: 1, stellen, einheit, endWert: true }],
+        werte: [...statistik(roh, stellen, einheit), { name: "Anzahl", wert: zahl(roh.length) }],
+        opt: { mitUhrzeit: mitUhrzeit && !wochen, wochen, yStellen: stellen > 1 ? 1 : stellen } };
+    } }))));
+  // Rohdaten
+  if (m.startsWith("g.") || m.startsWith("w.")) {
+    const art = m.split(".")[1];
+    const quelle = m.startsWith("g.") ? `g-${art}` : `w-${art}`;
+    const eingabe = h("input", { type: "date", value: daten[daten.length - 1][0], class: "suche", style: { maxWidth: "220px" } });
+    const pre = h("pre", { class: "roh", hidden: true });
+    const knopf = h("button", { type: "button", class: "knopf zweit", onclick: async () => {
+      const iso = eingabe.value;
+      const roh = await Daten.datei(`d/roh/${quelle}/${iso.slice(0, 4)}.enc`);
+      const eintrag = roh && roh[iso];
+      pre.textContent = eintrag ? JSON.stringify(eintrag, null, 2) : "Für diesen Tag gibt es keine Rohdaten.";
+      pre.hidden = false;
+    } }, "Rohdaten anzeigen");
+    if (!m.startsWith("w.mess.")) knoten.push(abschnitt("Rohdaten eines Tages", "So, wie der Dienst sie geliefert hat.", h("div", { class: "knopf-zeile", style: { alignItems: "center" } }, eingabe, knopf), pre));
+  }
+  return { titel: name, zurueck: "#werte", knoten };
+}
+
+// ======================================================================
+// Ansicht: Arztbericht (PDF)
+// ======================================================================
+const BERICHT_S = "gesundheit.bericht";
+function skriptLaden(src) {
+  return new Promise((ok, fehler) => {
+    const sk = h("script", { src });
+    sk.onload = () => ok();
+    sk.onerror = () => { sk.remove(); fehler(new Error(`${src} konnte nicht geladen werden. Bist du online?`)); };
+    document.head.append(sk);
+  });
+}
+async function berichtBibliotheken() {
+  if (!window.jspdf) await skriptLaden("vendor/jspdf.umd.min.js");
+  if (!window.jspdf.jsPDF.API.autoTable) await skriptLaden("vendor/jspdf.plugin.autotable.min.js");
+  if (!window.GesundheitBericht) await skriptLaden(`bericht.js?v=${APP_VERSION}`);
+}
+function berichtKontext() {
+  return { Daten, kennzahl, kennzahlen, wReihe, wTaeglich, wGruppe, blutdruckMessungen, istMorgens, textDeutsch, sportName, dauer, zahl, vorzeichen, mittel,
+    tagMs, isoAusMs, isoPlus, isoWoche, montagIso, nachWochen, tagesMittel, letzter, SCHRIFT, APP_VERSION };
+}
+const BERICHT_TEILE = [
+  ["blutdruck", "Blutdruck und Puls", "Mittelwerte morgens und abends, Verlauf, Wochenmittel"],
+  ["protokoll", "Blutdruck-Messprotokoll", "Jede einzelne Messung, als Anhang", "blutdruck"],
+  ["ekg", "EKG", "Aufzeichnungen mit der Auswertung des Geräts"],
+  ["ekgKurven", "EKG-Kurven", "Je Aufzeichnung eine Seite wie auf EKG-Papier", "ekg"],
+  ["herz", "Herz und Kreislauf", "Ruhepuls, Herzfrequenzvariabilität, Gefäße"],
+  ["koerper", "Körperzusammensetzung", "Gewicht, Fett, Muskeln, Wasser, Körperregionen"],
+  ["schlaf", "Schlaf und Atmung", "Dauer, Phasen, Sauerstoffsättigung, Atemfrequenz"],
+  ["aktivitaet", "Aktivität und Training", "Schritte, Intensitätsminuten, Trainings, VO₂max"],
+  ["aktivitaetenliste", "Aktivitätenliste", "Jede Aktivität einzeln, als Anhang", "aktivitaet"],
+  ["erholung", "Stress und Erholung", "Stress und Body Battery"],
+];
+async function berichtVerfuegbar(von, bis) {
+  const [w, ekg, akt] = await Promise.all([Daten.withings(), Daten.ekg(), Daten.aktivitaeten()]);
+  const a = tagMs(von), b = tagMs(bis) + 86399999;
+  const k = await kennzahlen(["ruhepuls", "hrv", "schlaf_dauer", "schritte", "stress"], von, bis);
+  const bp = blutdruckMessungen(w).filter((m) => m.ts >= a && m.ts <= b).length;
+  const e = ekg.filter((x) => x.ts && x.ts * 1000 >= a && x.ts * 1000 <= b);
+  const gewicht = wTaeglich(wReihe(w, 1).filter((p_) => p_[0] >= a && p_[0] <= b)).length;
+  const ak = akt.filter((x) => { const d = String(x.start || "").slice(0, 10); return d >= von && d <= bis; }).length;
+  const n = (x, eins, viele) => (x ? `${zahl(x)} ${x === 1 ? eins : viele}` : null);
+  return {
+    blutdruck: n(bp, "Messung", "Messungen"), protokoll: bp ? `etwa ${Math.max(1, Math.ceil(new Set(blutdruckMessungen(w).filter((m) => m.ts >= a && m.ts <= b).map((m) => isoAusMs(m.ts))).size / 34))} Seiten` : null,
+    ekg: n(e.length, "Aufzeichnung", "Aufzeichnungen"), ekgKurven: n(e.filter((x) => x.kurve).length, "Kurve", "Kurven"),
+    herz: n(Math.max(k.ruhepuls.length, k.hrv.length), "Tag", "Tage"), koerper: n(gewicht, "Messtag", "Messtage"),
+    schlaf: n(k.schlaf_dauer.length, "Nacht", "Nächte"), aktivitaet: n(ak, "Aktivität", "Aktivitäten") || n(k.schritte.length, "Tag", "Tage"),
+    aktivitaetenliste: n(ak, "Aktivität", "Aktivitäten"), erholung: n(k.stress.length, "Tag", "Tage"),
+  };
+}
+let berichtDatei = null;
+async function ansichtBericht() {
+  let g = {};
+  try { g = JSON.parse(speicher.get(BERICHT_S) || "{}") || {}; } catch { g = {}; }
+  const heute = heuteIso();
+  const ZR = [["30", "1 M", "1 Monat"], ["91", "3 M", "3 Monate"], ["182", "6 M", "6 Monate"], ["365", "12 M", "12 Monate"], ["frei", "Eigener", "Eigener Zeitraum"]];
+  let zr = ZR.some((x) => x[0] === g.zeitraum) ? g.zeitraum : "91";
+  const vonFeld = h("input", { type: "date", class: "eingabe", value: g.von || isoMinus(90), max: heute });
+  const bisFeld = h("input", { type: "date", class: "eingabe", value: g.bis || heute, max: heute });
+  const freiBox = h("div", { class: "datum-zeile" }, h("label", null, h("span", null, "Von"), vonFeld), h("label", null, h("span", null, "Bis"), bisFeld));
+  const zrText = h("p", { class: "leise", style: { marginTop: "10px" } });
+  const seg = h("div", { class: "segmente zr", role: "group", "aria-label": "Zeitraum des Berichts" });
+  const auswahl = { blutdruck: true, protokoll: true, ekg: true, ekgKurven: true, herz: true, koerper: true, schlaf: true, aktivitaet: true, aktivitaetenliste: false, erholung: true, ...(g.abschnitte || {}) };
+  const optionenBox = h("div", { class: "optionen" });
+  const zeitraumJetzt = () => (zr === "frei" ? [vonFeld.value || isoMinus(90), bisFeld.value || heute].sort() : [isoMinus(+zr - 1), heute]);
+  let verfuegbar = {};
+  let nr = 0;
+  const zeichneOptionen = () => {
+    optionenBox.replaceChildren(...BERICHT_TEILE.map(([id, name, text, eltern]) => {
+      const box = h("input", { type: "checkbox", id: `bt-${id}`, checked: auswahl[id] || null, disabled: (eltern && !auswahl[eltern]) || null,
+        onchange: (e) => { auswahl[id] = e.target.checked; zeichneOptionen(); } });
+      const anzahl = verfuegbar[id];
+      return h("label", { class: `option${eltern ? " unter" : ""}`, for: `bt-${id}` }, box,
+        h("span", { class: "option-text" }, h("b", null, name), h("span", null, text)),
+        h("span", { class: `option-anzahl${anzahl ? "" : " leer-wert"}` }, anzahl || "keine Daten"));
+    }));
+  };
+  const aktualisieren = async () => {
+    const meins = ++nr;
+    seg.replaceChildren(...ZR.map(([w_, n, lang]) => h("button", { type: "button", "aria-pressed": String(w_ === zr), "aria-label": lang, title: lang, onclick: () => { zr = w_; aktualisieren(); } }, n)));
+    freiBox.hidden = zr !== "frei";
+    const [von, bis] = zeitraumJetzt();
+    const tage = Math.round((tagMs(bis) - tagMs(von)) / 86400000) + 1;
+    zrText.textContent = `${DF.kurzJahr.format(new Date(tagMs(von)))} bis ${DF.kurzJahr.format(new Date(tagMs(bis)))}, ${zahl(tage)} Tage`;
+    const v = await berichtVerfuegbar(von, bis);
+    if (meins !== nr) return;
+    verfuegbar = v;
+    zeichneOptionen();
+  };
+  vonFeld.addEventListener("change", aktualisieren);
+  bisFeld.addEventListener("change", aktualisieren);
+  const nameFeld = h("input", { type: "text", class: "eingabe", value: g.name || "", autocomplete: "name", placeholder: "Vor- und Nachname" });
+  const geburtFeld = h("input", { type: "date", class: "eingabe", value: g.geburt || "", max: heute });
+  const notizFeld = h("textarea", { class: "eingabe", rows: 3, placeholder: "Zum Beispiel Anlass des Termins, Medikamente oder Fragen an die Praxis" });
+  notizFeld.value = g.notiz || "";
+  const merken = h("input", { type: "checkbox", id: "bt-merken", checked: g.merken !== false || null });
+  const status = h("p", { class: "bericht-status", role: "status", "aria-live": "polite" });
+  const ergebnisBox = h("div", { class: "bericht-ergebnis", hidden: true });
+  const knopf = h("button", { type: "button", class: "knopf" }, icon("bericht", 20), "PDF erstellen");
+  const zeigeErgebnis = (datei) => {
+    const kb = datei.blob.size / 1024;
+    const groesse = kb > 1000 ? `${zahl(kb / 1024, 1)} MB` : `${zahl(kb)} KB`;
+    const teilbar = (() => { try { return Boolean(navigator.canShare && navigator.canShare({ files: [new File([datei.blob], datei.dateiname, { type: "application/pdf" })] })); } catch { return false; } })();
+    ergebnisBox.replaceChildren(icon("haken", 24),
+      h("div", null, h("b", null, "Der Bericht ist fertig"), h("span", null, `${datei.dateiname}, ${datei.seiten} ${datei.seiten === 1 ? "Seite" : "Seiten"}, ${groesse}`),
+        h("div", { class: "knopf-zeile" },
+          h("a", { class: "knopf", href: datei.url, download: datei.dateiname }, "Speichern"),
+          teilbar ? h("button", { type: "button", class: "knopf zweit", onclick: async () => {
+            try { await navigator.share({ files: [new File([datei.blob], datei.dateiname, { type: "application/pdf" })], title: "Gesundheitsbericht" }); }
+            catch (e) { if (e && e.name !== "AbortError") status.textContent = "Teilen hat nicht geklappt. Speichere den Bericht und hänge ihn selbst an."; }
+          } }, "Teilen") : null,
+          h("a", { class: "knopf zweit", href: datei.url, target: "_blank", rel: "noopener" }, "Ansehen"))));
+    ergebnisBox.hidden = false;
+  };
+  knopf.addEventListener("click", async () => {
+    const [von, bis] = zeitraumJetzt();
+    if (von > bis) { status.textContent = "Der Anfang liegt nach dem Ende. Bitte die Daten prüfen."; return; }
+    const einstellungen = { zeitraum: zr, von: vonFeld.value, bis: bisFeld.value, abschnitte: auswahl, merken: merken.checked };
+    if (merken.checked) Object.assign(einstellungen, { name: nameFeld.value.trim(), geburt: geburtFeld.value, notiz: notizFeld.value.trim() });
+    speicher.set(BERICHT_S, JSON.stringify(einstellungen));
+    knopf.disabled = true; ergebnisBox.hidden = true;
+    status.textContent = "Bericht wird vorbereitet …";
+    try {
+      await berichtBibliotheken();
+      const datei = await window.GesundheitBericht.erstellen(berichtKontext(),
+        { von, bis, name: nameFeld.value.trim(), geburt: geburtFeld.value, notiz: notizFeld.value.trim(), abschnitte: { ...auswahl } },
+        (text) => { status.textContent = text; });
+      if (berichtDatei && berichtDatei.url) URL.revokeObjectURL(berichtDatei.url);
+      berichtDatei = { ...datei, url: URL.createObjectURL(datei.blob) };
+      status.textContent = "";
+      zeigeErgebnis(berichtDatei);
+    } catch (e) {
+      console.error(e);
+      status.textContent = `Der Bericht konnte nicht erstellt werden (${e && e.message ? e.message : e}).`;
+    } finally { knopf.disabled = false; }
+  });
+  await aktualisieren();
+  return { titel: "Arztbericht", knoten: [
+    h("p", { class: "einleitung-bericht" }, "Ein PDF mit den wichtigen Werten aus Withings und Garmin – zum Mitnehmen, Mailen oder Ausdrucken. Es entsteht auf diesem Gerät; deine Daten verlassen es dabei nicht."),
+    abschnitt("Zeitraum", null, seg, freiBox, zrText),
+    abschnitt("Angaben für die Praxis", "Freiwillig. Sie stehen nur im PDF und bleiben auf diesem Gerät.",
+      h("div", { class: "felder" },
+        h("label", { class: "feld-app" }, h("span", null, "Name"), nameFeld),
+        h("label", { class: "feld-app" }, h("span", null, "Geburtsdatum"), geburtFeld),
+        h("label", { class: "feld-app breit" }, h("span", null, "Anmerkung"), notizFeld)),
+      h("label", { class: "merken", for: "bt-merken" }, merken, "Angaben auf diesem Gerät merken")),
+    abschnitt("Inhalt", "Die Übersicht ist immer dabei. Bereiche ohne Daten im Zeitraum werden übersprungen.", optionenBox),
+    h("div", { class: "abschnitt" }, h("div", { class: "knopf-zeile" }, knopf), status, ergebnisBox),
+    berichtDatei ? (() => { zeigeErgebnis(berichtDatei); return null; })() : null,
+  ] };
+}
+
+// ======================================================================
+// Ansicht: Status
+// ======================================================================
+function stundenSeitAbruf() {
+  const i = Daten.index;
+  if (!i || !i.eingerichtet || !i.stand) return 0;
+  return (Date.now() - Date.parse(i.stand)) / 3600000;
+}
+function workflowAdresse() {
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/i);
+  const repo = location.pathname.split("/").filter(Boolean)[0];
+  return m && repo ? `https://github.com/${m[1]}/${repo}/actions/workflows/gesundheit.yml` : null;
+}
+async function ansichtStatus() {
+  const idx = Daten.index;
+  const q = idx.quellen || {};
+  const protokoll = ((await Daten.datei("d/protokoll.enc")) || {}).zeilen || [];
+  const quelleBlock = (name, st, extra) => {
+    let zustand;
+    if (!st || !st.verbunden) zustand = chip("nicht verbunden", "neutral");
+    else if (st.anmeldung_noetig) zustand = chip("neu anmelden", "kritisch");
+    else if (st.ok === false) zustand = chip("Fehler beim Abruf", "ernst");
+    else if (st.fehler) zustand = chip("wartet", "warnung");
+    else zustand = chip("verbunden", "gut");
+    return h("div", { class: "quelle" },
+      h("div", { class: "quelle-kopf" }, h("h3", null, name), zustand),
+      st && st.letzter_erfolg ? h("p", { class: "leise" }, `Zuletzt erfolgreich ${vorZeit(st.letzter_erfolg)}`) : null,
+      st && st.fehler ? h("p", null, st.fehler) : null,
+      st && st.anmeldung_noetig ? h("p", { class: "leise" }, "Öffne auf dem Chromebook das Einrichtungsfenster (Symbol „Gesundheit Einrichtung“ bei den Linux-Apps), melde dich dort neu an und klicke auf „In die Cloud übertragen“. Danach geht es automatisch weiter.") : null,
+      extra || null);
+  };
+  const g = q.garmin || {};
+  const darstellung = speicher.get(S.darstellung) || "system";
+  const wf = workflowAdresse();
+  const knopfEntfernen = h("button", { type: "button", class: "knopf zweit" }, "Schlüssel von diesem Gerät entfernen");
+  knopfEntfernen.addEventListener("click", () => {
+    if (knopfEntfernen.dataset.sicher) { speicher.set(S.schluessel, null); location.hash = ""; location.reload(); return; }
+    knopfEntfernen.dataset.sicher = "1"; knopfEntfernen.textContent = "Wirklich entfernen? Noch einmal tippen";
+  });
+  const knoten = [
+    abschnitt("Datenquellen", `Die Daten werden stündlich abgerufen. Letzter Abruf ${vorZeit(idx.stand)}.`,
+      stundenSeitAbruf() > 3 ? hinweis([
+        `Der letzte Abruf war ${vorZeit(idx.stand)}, normalerweise kommt jede Stunde einer.`,
+        "Tippe auf „Jetzt abrufen“ – das schaltet einen von GitHub pausierten Abruf auch wieder ein. Ohne Sync-Knopf: auf der GitHub-Seite „Enable workflow“ und danach „Run workflow“ antippen.",
+      ], "warnung", "warnung") : null,
+      quelleBlock("Withings", q.withings),
+      quelleBlock("Garmin Connect", g, g.verbunden ? werteListe([
+        { name: "Historie", wert: g.historie_fertig ? "vollständig" : "lädt", neben: g.historie_bis ? `zurück bis ${datum(g.historie_bis, "kurz")}` : "" },
+        { name: "Aktivitäten", wert: zahl(g.aktivitaeten || 0), neben: g.details_offen ? `${zahl(g.details_offen)} Details folgen` : "alle Details geladen" },
+        { name: "Tagesverläufe", wert: zahl((idx.verlaeufe || []).length) },
+      ]) : null),
+      h("div", { class: "knopf-zeile" },
+        h("button", { class: "knopf", type: "button", onclick: () => Sync.starten() }, icon("sync", 20), "Jetzt abrufen"),
+        wf ? h("a", { class: "knopf zweit", href: wf, target: "_blank", rel: "noopener" }, "GitHub-Seite des Abrufs") : null),
+      h("p", { class: "fussnote" }, Daten.hat("d/sync.enc")
+        ? `„Jetzt abrufen“ (auch oben mit dem Pfeil-Symbol) startet sofort einen Abruf und meldet, ob er geklappt hat.${Sync.zuletzt ? ` Zuletzt: ${Sync.zuletzt.titel.toLowerCase()}, ${uhr(Sync.zuletzt.zeit)} Uhr.` : ""}`
+        : "Der Sync-Knopf ist noch nicht freigeschaltet (Einrichtungsfenster am Chromebook, Schritt 5). Bis dahin: auf der GitHub-Seite „Run workflow“ antippen.")),
+    abschnitt("Gespeicherte Daten", null, werteListe([
+      { name: "Withings-Messwerte", wert: zahl(idx.zaehler?.messungen || 0) }, { name: "Aktivitäten", wert: zahl(idx.zaehler?.aktivitaeten || 0) },
+      { name: "EKG", wert: zahl(idx.zaehler?.ekg || 0) }, { name: "Arten von Tageswerten", wert: zahl(idx.zaehler?.metriken || 0) },
+      { name: "Jahre", wert: (idx.jahre || []).length ? `${idx.jahre[0]}–${idx.jahre[idx.jahre.length - 1]}` : "–" },
+    ])),
+    abschnitt("Darstellung", null, h("div", { class: "segmente", role: "group", "aria-label": "Darstellung" }, [["system", "Wie das Gerät"], ["light", "Hell"], ["dark", "Dunkel"]].map(([w_, t]) =>
+      h("button", { type: "button", "aria-pressed": String(darstellung === w_), onclick: () => {
+        speicher.set(S.darstellung, w_ === "system" ? null : w_);
+        if (w_ === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", w_);
+        neuZeichnen();
+      } }, t)))),
+    abschnitt("Dieses Gerät", "Der Schlüssel liegt nur in diesem Browser. Ohne ihn sind die Daten nicht lesbar.", knopfEntfernen),
+    abschnitt("Protokoll", "Die letzten Abrufe, neueste zuerst.", protokoll.length ? h("ul", { class: "protokoll" }, protokoll.slice(-120).reverse().map(([t, stufe, text]) =>
+      h("li", { class: stufe === "fehler" ? "fehler" : "" }, h("time", null, DF.datumZeit.format(new Date(t * 1000)).replace(/\d{4}, /, "")), h("span", null, text)))) : leer("Noch kein Protokoll", "")),
+    h("p", { class: "fussnote", style: { marginTop: "32px" } }, `App ${APP_VERSION}, Datenstand ${idx.stand ? DF.datumZeit.format(new Date(idx.stand)) : "–"}.`),
+  ];
+  return { titel: "Status", knoten };
+}
+
+// ======================================================================
+// Sync-Knopf: startet den Abruf bei GitHub und meldet, ob er geklappt hat
+// ======================================================================
+const SYNC_SPEICHER = "gesundheit.sync";
+const GH_API = "https://api.github.com";
+class SyncFehler extends Error { constructor(text, status = 0) { super(text); this.status = status; } }
+const warte = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const Sync = {
+  zustand: "bereit", titel: "", text: "", adresse: null, nr: 0, ausblenden: null, zuletzt: null,
+  laeuft() { return ["startet", "wartet", "laeuft"].includes(this.zustand); },
+  async zugang() {
+    try { const z = await Daten.datei("d/sync.enc"); return z && z.token && z.repo ? z : null; } catch { return null; }
+  },
+  async rufe(z, methode, pfad, body) {
+    let r;
+    try {
+      r = await fetch(GH_API + pfad, { method: methode, cache: "no-store", body: body ? JSON.stringify(body) : undefined,
+        headers: { Authorization: `Bearer ${z.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", ...(body ? { "Content-Type": "application/json" } : {}) } });
+    } catch { throw new SyncFehler("Keine Verbindung zu GitHub. Bist du online?"); }
+    if (r.status === 401) throw new SyncFehler("Der Sync-Token ist ungültig oder wurde gelöscht. Lege im Einrichtungsfenster am Chromebook (Schritt 5) einen neuen an.", 401);
+    if (r.status === 403 && r.headers.get("x-ratelimit-remaining") === "0") throw new SyncFehler("GitHub hat gerade zu viele Anfragen gezählt. Versuch es in ein paar Minuten noch einmal.", 403);
+    if (r.status === 403 || r.status === 404) throw new SyncFehler(`Der Sync-Token darf den Abruf nicht starten. Lege ihn im Einrichtungsfenster (Schritt 5) neu an – mit dem Repository „${z.repo.split("/")[1]}“ und „Actions: Read and write“.`, r.status);
+    if (!r.ok) throw new SyncFehler(`GitHub meldet Fehler ${r.status}.`, r.status);
+    return r.status === 204 ? null : r.json().catch(() => null);
+  },
+  async starten() {
+    if (this.laeuft()) { this.zeigen(); return; }
+    const z = await this.zugang();
+    if (!z) {
+      const wf = workflowAdresse();
+      this.setze("aus", "Sync-Knopf noch nicht freigeschaltet", "Schalte ihn einmal im Einrichtungsfenster am Chromebook frei (Schritt 5). Bis dahin holt GitHub die Daten jede Stunde von selbst.",
+        wf ? { text: "Abruf auf der GitHub-Seite starten", href: wf } : null);
+      return;
+    }
+    const nr = ++this.nr;
+    this.adresse = null;
+    this.setze("startet", "Abruf wird gestartet …", "Einen Moment.");
+    try {
+      const runs = `/repos/${z.repo}/actions/workflows/${z.workflow}/runs?per_page=10`;
+      const vorher = new Set((((await this.rufe(z, "GET", runs)) || {}).workflow_runs || []).map((x) => x.id));
+      const beginn = Date.now();
+      const anstossen = () => this.rufe(z, "POST", `/repos/${z.repo}/actions/workflows/${z.workflow}/dispatches`, { ref: z.zweig || "main" });
+      try { await anstossen(); }
+      catch (e) {
+        // Von GitHub pausiert (60 Tage ohne Aktivität)? Wieder einschalten und noch einmal versuchen.
+        if (!(e instanceof SyncFehler) || ![403, 422].includes(e.status) || /zu viele/.test(e.message)) throw e;
+        try { await this.rufe(z, "PUT", `/repos/${z.repo}/actions/workflows/${z.workflow}/enable`); await anstossen(); } catch { throw e; }
+      }
+      this.setze("wartet", "Abruf angefordert", "GitHub startet ihn gleich …");
+      let lauf = null;
+      for (let i = 0; i < 40 && !lauf; i++) {
+        await warte(3000);
+        if (nr !== this.nr) return;
+        const liste = (((await this.rufe(z, "GET", runs)) || {}).workflow_runs) || [];
+        lauf = liste.find((x) => !vorher.has(x.id) && x.event === "workflow_dispatch") || null;
+      }
+      if (!lauf) throw new SyncFehler("GitHub hat den Abruf angenommen, aber noch nicht gestartet. Schau gleich noch einmal oder auf der GitHub-Seite nach.");
+      speicher.set(SYNC_SPEICHER, JSON.stringify({ id: lauf.id, beginn, alt: Daten.index && Daten.index.stand }));
+      await this.verfolgen(z, lauf.id, beginn, nr, Daten.index && Daten.index.stand);
+    } catch (e) { if (nr === this.nr) this.fehler(e); }
+  },
+  async verfolgen(z, id, beginn, nr, altStand) {
+    for (;;) {
+      if (nr !== this.nr) return;
+      const l = await this.rufe(z, "GET", `/repos/${z.repo}/actions/runs/${id}`);
+      this.adresse = l.html_url || null;
+      if (l.status === "completed") { speicher.set(SYNC_SPEICHER, null); await this.abschluss(l, altStand, nr); return; }
+      const min = Math.floor((Date.now() - beginn) / 60000);
+      if (l.status === "in_progress") this.setze("laeuft", "Abruf läuft …", `Withings und Garmin werden abgefragt${min >= 1 ? ` (seit ${min} Min.)` : ""}. Das dauert meist zwei bis vier Minuten – du kannst die App weiter benutzen.`);
+      else this.setze("wartet", "Abruf wartet …", "Gerade läuft schon ein Abruf. Deiner startet direkt danach.");
+      if (Date.now() - beginn > 30 * 60000) { speicher.set(SYNC_SPEICHER, null); throw new SyncFehler("Der Abruf dauert ungewöhnlich lange. Schau auf der GitHub-Seite nach."); }
+      await warte(5000);
+    }
+  },
+  async abschluss(l, altStand, nr) {
+    if (l.conclusion !== "success") {
+      this.setze("fehler", "Abruf fehlgeschlagen", l.conclusion === "cancelled" ? "Der Abruf wurde abgebrochen." : "Bei GitHub ist etwas schiefgegangen. Der nächste stündliche Abruf versucht es wieder.",
+        this.adresse ? { text: "Details bei GitHub", href: this.adresse } : null);
+      return;
+    }
+    this.setze("laeuft", "Abruf fertig", "Die neuen Daten werden geladen …");
+    for (let i = 0; i < 10; i++) {   // GitHub Pages braucht nach dem Abruf einen Moment
+      try { await Daten.ladeIndex(); } catch { /* gleich noch einmal */ }
+      if (Daten.index && Daten.index.stand !== altStand) break;
+      await warte(6000);
+      if (nr !== this.nr) return;
+    }
+    Daten.cache.clear(); standZeigen(); neuZeichnen();
+    const q = (Daten.index && Daten.index.quellen) || {};
+    const probleme = [["Withings", q.withings], ["Garmin", q.garmin]].filter(([, st]) => st && st.verbunden && (st.anmeldung_noetig || st.ok === false || st.fehler));
+    const stand = Daten.index && Daten.index.stand ? `${uhr(Date.parse(Daten.index.stand))} Uhr` : "";
+    if (!probleme.length) this.setze("ok", "Abruf erfolgreich", `Withings und Garmin sind auf dem Stand von ${stand}.`);
+    else this.setze("teilweise", "Abruf mit Problemen", probleme.map(([n, st]) => `${n}: ${st.anmeldung_noetig ? "bitte neu anmelden (Einrichtungsfenster)" : st.fehler || "Fehler beim Abruf"}.`).join(" "),
+      { text: "Status ansehen", href: "#status" });
+  },
+  fehler(e) {
+    console.error(e);
+    this.setze("fehler", "Abruf fehlgeschlagen", e instanceof SyncFehler ? e.message : `Unerwarteter Fehler (${e && e.message ? e.message : e}).`,
+      this.adresse ? { text: "Details bei GitHub", href: this.adresse } : null);
+  },
+  async fortsetzen() {
+    let g = null;
+    try { g = JSON.parse(speicher.get(SYNC_SPEICHER) || "null"); } catch { g = null; }
+    if (!g || !g.id || Date.now() - g.beginn > 30 * 60000) { speicher.set(SYNC_SPEICHER, null); return; }
+    const z = await this.zugang();
+    if (!z) return;
+    const nr = ++this.nr;
+    this.setze("laeuft", "Abruf läuft …", "Der zuletzt gestartete Abruf wird weiter verfolgt.");
+    try { await this.verfolgen(z, g.id, g.beginn, nr, g.alt); } catch (e) { if (nr === this.nr) this.fehler(e); }
+  },
+  setze(zustand, titel, text, aktion = null) {
+    Object.assign(this, { zustand, titel, text, aktion });
+    if (["ok", "teilweise", "fehler"].includes(zustand)) this.zuletzt = { zustand, titel, text, zeit: Date.now() };
+    this.zeigen();
+  },
+  zeigen() {
+    if (!SYNC_KNOPF) return;
+    const z = this.zustand;
+    SYNC_KNOPF.className = `sync-knopf ${z}`;
+    SYNC_KNOPF.setAttribute("aria-label", this.laeuft() ? "Abruf läuft" : "Jetzt abrufen");
+    SYNC_KNOPF.disabled = false;
+    clearTimeout(this.ausblenden);
+    if (z === "bereit") { SYNC_MELDUNG.hidden = true; return; }
+    const symbol = this.laeuft() ? h("span", { class: "sync-drehen", "aria-hidden": "true" }, icon("sync", 22)) : icon(z === "ok" ? "haken" : z === "aus" ? "info" : "warnung", 22);
+    SYNC_MELDUNG.className = `sync-meldung ${z}`;
+    SYNC_MELDUNG.replaceChildren(...[symbol,
+      h("div", { class: "sync-text" }, h("b", null, this.titel), this.text ? h("span", null, this.text) : null,
+        this.aktion ? h("a", { href: this.aktion.href, ...(this.aktion.href.startsWith("#") ? {} : { target: "_blank", rel: "noopener" }) }, this.aktion.text) : null),
+      this.laeuft() ? null : h("button", { type: "button", class: "dialog-zu", "aria-label": "Meldung schließen", onclick: () => { this.zustand = "bereit"; this.zeigen(); } }, icon("zu", 18))].filter(Boolean));
+    SYNC_MELDUNG.hidden = false;
+    if (z === "ok") this.ausblenden = setTimeout(() => { if (this.zustand === "ok") { this.zustand = "bereit"; this.zeigen(); } }, 15000);
+  },
+};
+
+// ======================================================================
+// Gerüst, Navigation, Router
+// ======================================================================
+const NAV = [["heute", "Heute"], ["koerper", "Körper"], ["herz", "Herz"], ["schlaf", "Schlaf"], ["sport", "Sport"]];
+const MEHR = [["bericht", "Arztbericht (PDF)", "Alle wichtigen Werte für die Ärztin oder den Arzt"], ["tag", "Tag im Detail", "Puls, Stress, Body Battery und Schlaf eines Tages"], ["werte", "Alle Werte", "Jede Messgröße einzeln, mit Rohdaten"], ["status", "Status", "Abrufe, Verbindung und Darstellung"]];
+const ANSICHTEN = { heute: ansichtHeute, koerper: ansichtKoerper, herz: ansichtHerz, schlaf: ansichtSchlaf, sport: ansichtSport,
+  tag: ansichtTag, werte: ansichtWerte, status: ansichtStatus, aktivitaet: ansichtAktivitaet, ekg: ansichtEkg, bericht: ansichtBericht };
+let MAIN, KOPF_TITEL, KOPF_ZURUECK, KOPF, STAND, DIALOG, SYNC_KNOPF, SYNC_MELDUNG;
+let LAUF = 0;
+
+function geruestBauen() {
+  const wurzel = document.getElementById("wurzel");
+  KOPF_TITEL = h("h1", { class: "kopf-titel" }, "Heute");
+  KOPF_ZURUECK = h("a", { class: "kopf-zurueck", href: "#heute", "aria-label": "Zurück", hidden: true }, icon("zurueck"));
+  STAND = h("a", { class: "stand", href: "#status" });
+  const menueKnopf = h("button", { class: "menue-knopf", type: "button", "aria-label": "Mehr" }, icon("mehr"));
+  SYNC_KNOPF = h("button", { class: "sync-knopf", type: "button", "aria-label": "Jetzt abrufen", title: "Jetzt abrufen", onclick: () => Sync.starten() }, icon("sync"), h("span", { class: "sync-punkt", "aria-hidden": "true" }));
+  KOPF = h("header", { class: "kopf" }, KOPF_ZURUECK, KOPF_TITEL, STAND, SYNC_KNOPF, menueKnopf);
+  SYNC_MELDUNG = h("div", { class: "sync-meldung", role: "status", "aria-live": "polite", hidden: true });
+  MAIN = h("main", { class: "seite", id: "inhalt" });
+  const leiste = h("nav", { class: "leiste", "aria-label": "Bereiche" }, NAV.map(([id, name]) => h("a", { href: `#${id}`, "data-ziel": id }, icon(id), name)));
+  const seite = h("nav", { class: "seitenleiste", "aria-label": "Bereiche" },
+    h("div", { class: "marke" }, icon("marke", 30), "Gesundheit"),
+    NAV.map(([id, name]) => h("a", { href: `#${id}`, "data-ziel": id }, icon(id), name)),
+    h("div", { class: "trenner" }),
+    MEHR.map(([id, name]) => h("a", { href: `#${id}`, "data-ziel": id }, icon(id), name)));
+  DIALOG = h("dialog", { class: "blatt-dialog", "aria-label": "Weitere Bereiche" }, h("div", { class: "dialog-inhalt" },
+    h("div", { class: "dialog-kopf" }, h("h2", null, "Mehr"), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: () => DIALOG.close() }, icon("zu", 20))),
+    h("div", { class: "menue-liste" }, MEHR.map(([id, name, text]) => h("a", { href: `#${id}`, onclick: () => DIALOG.close() }, icon(id), h("span", null, name, h("small", null, text)))))));
+  DIALOG.addEventListener("click", (e) => { if (e.target === DIALOG) DIALOG.close(); });
+  menueKnopf.addEventListener("click", () => DIALOG.showModal());
+  wurzel.replaceChildren(h("div", { class: "app" }, seite, h("div", null, KOPF, SYNC_MELDUNG, MAIN), leiste), DIALOG);
+  window.addEventListener("scroll", () => KOPF.classList.toggle("mit-linie", window.scrollY > 4), { passive: true });
+  standZeigen();
+}
+function standZeigen() {
+  if (!STAND || !Daten.index) return;
+  const q = Daten.index.quellen || {};
+  const liste = Object.values(q).filter((x) => x && x.verbunden);
+  let art = "";
+  if (liste.some((x) => x.anmeldung_noetig || x.ok === false)) art = "fehler";
+  else if (liste.some((x) => x.fehler) || stundenSeitAbruf() > 3) art = "warnung";
+  STAND.replaceChildren(h("span", { class: `stand-punkt ${art}`, "aria-hidden": "true" }), h("span", null, vorZeit(Daten.index.stand)));
+  STAND.setAttribute("aria-label", `Datenstand ${vorZeit(Daten.index.stand)}${art ? ", bitte Status prüfen" : ""}`);
+}
+function navMarkieren(ziel) {
+  const haupt = { aktivitaet: "sport", ekg: "herz" }[ziel] || ziel;
+  document.querySelectorAll("[data-ziel]").forEach((a) => { if (a.dataset.ziel === haupt) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+}
+let letzteAnsicht = "";
+async function route() {
+  const lauf = ++LAUF;
+  const [name, ...teile] = (location.hash.slice(1) || "heute").split("/");
+  const ansicht = ANSICHTEN[name] ? name : "heute";
+  const wechsel = location.hash !== letzteAnsicht;
+  letzteAnsicht = location.hash;
+  navMarkieren(ansicht);
+  const scroll = wechsel ? 0 : window.scrollY;
+  NACH.length = 0;
+  let ergebnis;
+  try { ergebnis = await ANSICHTEN[ansicht](...teile); }
+  catch (e) {
+    console.error(e);
+    ergebnis = { titel: "Fehler", knoten: [hinweis([`Diese Ansicht konnte nicht geladen werden (${e && e.message ? e.message : e}).`, "Lade die Seite neu. Hilft das nicht, prüfe den Status."], "fehler", "warnung")] };
+  }
+  if (lauf !== LAUF) return;
+  diagrammeAufraeumen();
+  if (KARTE) { try { KARTE.remove(); } catch { /* weg */ } KARTE = null; }
+  KOPF_TITEL.textContent = ergebnis.titel;
+  document.title = ergebnis.titel === "Heute" ? "Gesundheit" : `${ergebnis.titel} – Gesundheit`;
+  KOPF_ZURUECK.hidden = !ergebnis.zurueck;
+  if (ergebnis.zurueck) KOPF_ZURUECK.href = ergebnis.zurueck;
+  MAIN.replaceChildren(...ergebnis.knoten.flat().filter((k) => k != null && k !== false));
+  const auftraege = NACH.splice(0);
+  requestAnimationFrame(() => {
+    for (const f of auftraege) { try { f(); } catch (e) { console.error(e); } }
+    window.scrollTo(0, scroll);
+  });
+}
+function neuZeichnen() { letzteAnsicht = location.hash; route(); }
+
+// ======================================================================
+// Schlüssel-Tor
+// ======================================================================
+function tor(fehlertext) {
+  const wurzel = document.getElementById("wurzel");
+  const feld = h("textarea", { placeholder: "Schlüssel oder Link aus dem Einrichtungsfenster einfügen", "aria-label": "Schlüssel", autocomplete: "off", spellcheck: "false" });
+  const meldung = h("p", { class: "fehlertext", hidden: !fehlertext }, fehlertext || "");
+  const kamera = h("div", { class: "kamera", hidden: true });
+  const uebernehmen = async (text) => {
+    const m = String(text).match(/k=([A-Za-z0-9_-]{43})/) || String(text).trim().match(/^([A-Za-z0-9_-]{43})$/);
+    if (!m) { meldung.textContent = "Das ist kein gültiger Schlüssel. Er ist 43 Zeichen lang."; meldung.hidden = false; return; }
+    speicher.set(S.schluessel, m[1]);
+    location.hash = "#heute";
+    location.reload();
+  };
+  const scannen = async () => {
+    meldung.hidden = true;
+    let strom;
+    try { strom = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false }); }
+    catch { meldung.textContent = "Die Kamera ist nicht freigegeben. Erlaube den Zugriff oder füge den Schlüssel unten ein."; meldung.hidden = false; return; }
+    const video = h("video", { playsinline: true, muted: true, autoplay: true });
+    video.srcObject = strom;
+    kamera.replaceChildren(video); kamera.hidden = false;
+    await video.play().catch(() => {});
+    let erkenner = null;
+    if ("BarcodeDetector" in window) { try { erkenner = new BarcodeDetector({ formats: ["qr_code"] }); } catch { erkenner = null; } }
+    if (!erkenner) {
+      await new Promise((ok, f) => { const sk = h("script", { src: "vendor/jsQR.js" }); sk.onload = ok; sk.onerror = f; document.head.append(sk); }).catch(() => {});
+    }
+    const leinwand = document.createElement("canvas");
+    const ctx = leinwand.getContext("2d", { willReadFrequently: true });
+    const stopp = () => strom.getTracks().forEach((t) => t.stop());
+    const schritt = async () => {
+      if (kamera.hidden) { stopp(); return; }
+      try {
+        if (erkenner) {
+          const codes = await erkenner.detect(video);
+          if (codes.length) { stopp(); return uebernehmen(codes[0].rawValue); }
+        } else if (window.jsQR && video.videoWidth) {
+          leinwand.width = video.videoWidth; leinwand.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          const bild = ctx.getImageData(0, 0, leinwand.width, leinwand.height);
+          const code = window.jsQR(bild.data, bild.width, bild.height);
+          if (code && code.data) { stopp(); return uebernehmen(code.data); }
+        }
+      } catch { /* weiter versuchen */ }
+      setTimeout(schritt, 250);
+    };
+    schritt();
+  };
+  wurzel.replaceChildren(h("div", { class: "tor" }, h("div", { class: "tor-inhalt" },
+    (() => { const m = icon("marke", 64); m.classList.add("tor-marke"); return m; })(),
+    h("h1", null, "Gesundheit"),
+    h("p", null, "Deine Withings- und Garmin-Daten sind verschlüsselt. Damit dieses Gerät sie lesen kann, braucht es einmal deinen Schlüssel."),
+    h("p", null, "Den QR-Code zeigt dir das Einrichtungsfenster auf dem Chromebook im letzten Schritt."),
+    h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: scannen }, icon("kamera", 20), "QR-Code scannen")),
+    kamera, meldung, feld,
+    h("div", { class: "knopf-zeile" }, h("button", { class: "knopf zweit", type: "button", onclick: () => uebernehmen(feld.value) }, "Schlüssel übernehmen")))));
+}
+
+// ======================================================================
+// Start
+// ======================================================================
+async function start() {
+  const m = location.hash.match(/k=([A-Za-z0-9_-]{43})/);
+  if (m) { speicher.set(S.schluessel, m[1]); history.replaceState(null, "", location.pathname + location.search + "#heute"); }
+  const k = speicher.get(S.schluessel);
+  if (!("DecompressionStream" in window) || !window.crypto || !crypto.subtle) {
+    document.getElementById("wurzel").replaceChildren(h("div", { class: "tor" }, h("div", { class: "tor-inhalt" }, h("h1", null, "Browser zu alt"),
+      h("p", null, "Bitte aktualisiere den Browser (Chrome, Safari 16.4 oder neuer, Firefox), dann klappt es."))));
+    return;
+  }
+  if (!k) return tor();
+  try { await schluesselAktivieren(k); } catch { return tor("Der gespeicherte Schlüssel ist ungültig."); }
+  try { await Daten.ladeIndex(); }
+  catch (e) {
+    if (e instanceof SchluesselFalsch) return tor("Dieser Schlüssel passt nicht zu den Daten. Scanne den QR-Code noch einmal.");
+    document.getElementById("wurzel").replaceChildren(h("div", { class: "tor" }, h("div", { class: "tor-inhalt" }, h("h1", null, "Keine Verbindung"),
+      h("p", null, "Die Daten konnten nicht geladen werden. Prüfe die Internetverbindung und lade die Seite neu."))));
+    return;
+  }
+  if (!Daten.index) {
+    document.getElementById("wurzel").replaceChildren(h("div", { class: "tor" }, h("div", { class: "tor-inhalt" }, h("h1", null, "Gleich geht's los"),
+      h("p", null, "Der erste Abruf läuft noch. Das dauert beim ersten Mal bis zu 15 Minuten. Lade die Seite danach neu."))));
+    return;
+  }
+  geruestBauen();
+  window.addEventListener("hashchange", route);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
+  await route();
+  Sync.fortsetzen();
+  // regelmäßig nach neuen Daten sehen
+  setInterval(async () => {
+    if (document.hidden) return;
+    const alt = Daten.index && Daten.index.stand;
+    try { await Daten.ladeIndex(); } catch { return; }
+    if (Daten.index && Daten.index.stand !== alt) { Daten.cache.clear(); standZeigen(); neuZeichnen(); } else standZeigen();
+  }, 10 * 60 * 1000);
+  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+document.addEventListener("DOMContentLoaded", start);
+})();

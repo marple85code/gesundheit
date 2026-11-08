@@ -1,0 +1,87 @@
+# Gesundheits-App: holt stündlich alle Withings- und Garmin-Daten, speichert sie
+# verschlüsselt im Zweig "daten" und veröffentlicht die Web-App über GitHub Pages.
+name: Gesundheit
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "zustand.enc"
+      - "sammler.py"
+      - "requirements.txt"
+      - "web/**"
+      - ".github/workflows/gesundheit.yml"
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: gesundheit
+  cancel-in-progress: false
+
+jobs:
+  abruf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.bereitstellen.outputs.page_url }}
+    steps:
+      - name: Programm holen
+        uses: actions/checkout@v7
+
+      - name: Python einrichten
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Bibliotheken installieren
+        run: pip install --disable-pip-version-check -q -r requirements.txt
+
+      - name: Bisherige Daten holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git clone --quiet --depth 1 --branch daten "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ablage 2>/dev/null; then
+            rm -rf ablage/.git
+          else
+            mkdir -p ablage
+          fi
+
+      - name: Daten abrufen und Seite bauen
+        env:
+          GESUNDHEIT_SCHLUESSEL: ${{ secrets.GESUNDHEIT_SCHLUESSEL }}
+        run: python sammler.py --ablage ablage --web web --seite _site --paket zustand.enc
+
+      - name: Daten sichern
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -d ablage ] || [ -z "$(ls -A ablage)" ]; then exit 0; fi
+          cd ablage
+          git init --quiet -b daten
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --quiet -m "Datenstand"
+          for _ in 1 2 3; do
+            if git push --quiet --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" daten; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Seite hochladen
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Seite veröffentlichen
+        id: bereitstellen
+        uses: actions/deploy-pages@v5
