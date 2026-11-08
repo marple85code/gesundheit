@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2";
+const APP_VERSION = "1.2.2";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2669,13 +2669,13 @@ async function berichtBibliotheken() {
 }
 function berichtKontext() {
   return { Daten, kennzahl, kennzahlen, wReihe, wTaeglich, wGruppe, blutdruckMessungen, istMorgens, textDeutsch, sportName, dauer, zahl, vorzeichen, mittel,
-    tagMs, isoAusMs, isoPlus, isoWoche, montagIso, nachWochen, tagesMittel, letzter, SCHRIFT, APP_VERSION };
+    tagMs, isoAusMs, isoPlus, isoWoche, montagIso, nachWochen, tagesMittel, letzter, SCHRIFT, APP_VERSION,
+    personAus, wBereich, W_BEREICHE, PWV_GRENZE, spanne, ekgKlasse };
 }
 const BERICHT_TEILE = [
   ["blutdruck", "Blutdruck und Puls", "Mittelwerte morgens und abends, Verlauf, Wochenmittel"],
   ["protokoll", "Blutdruck-Messprotokoll", "Jede einzelne Messung, als Anhang", "blutdruck"],
-  ["ekg", "EKG", "Aufzeichnungen mit der Auswertung des Geräts"],
-  ["ekgKurven", "EKG-Kurven", "Je Aufzeichnung eine Seite wie auf EKG-Papier", "ekg"],
+  ["ekg", "EKG", "Die letzten fünf Aufzeichnungen mit der Auswertung des Geräts"],
   ["herz", "Herz und Kreislauf", "Ruhepuls, Herzfrequenzvariabilität, Gefäße"],
   ["koerper", "Körperzusammensetzung", "Gewicht, Fett, Muskeln, Wasser, Körperregionen"],
   ["schlaf", "Schlaf und Atmung", "Dauer, Phasen, Sauerstoffsättigung, Atemfrequenz"],
@@ -2694,7 +2694,7 @@ async function berichtVerfuegbar(von, bis) {
   const n = (x, eins, viele) => (x ? `${zahl(x)} ${x === 1 ? eins : viele}` : null);
   return {
     blutdruck: n(bp, "Messung", "Messungen"), protokoll: bp ? `etwa ${Math.max(1, Math.ceil(new Set(blutdruckMessungen(w).filter((m) => m.ts >= a && m.ts <= b).map((m) => isoAusMs(m.ts))).size / 34))} Seiten` : null,
-    ekg: n(e.length, "Aufzeichnung", "Aufzeichnungen"), ekgKurven: n(e.filter((x) => x.kurve).length, "Kurve", "Kurven"),
+    ekg: n(e.length, "Aufzeichnung", "Aufzeichnungen"),
     herz: n(Math.max(k.ruhepuls.length, k.hrv.length), "Tag", "Tage"), koerper: n(gewicht, "Messtag", "Messtage"),
     schlaf: n(k.schlaf_dauer.length, "Nacht", "Nächte"), aktivitaet: n(ak, "Aktivität", "Aktivitäten") || n(k.schritte.length, "Tag", "Tage"),
     aktivitaetenliste: n(ak, "Aktivität", "Aktivitäten"), erholung: n(k.stress.length, "Tag", "Tage"),
@@ -2712,7 +2712,7 @@ async function ansichtBericht() {
   const freiBox = h("div", { class: "datum-zeile" }, h("label", null, h("span", null, "Von"), vonFeld), h("label", null, h("span", null, "Bis"), bisFeld));
   const zrText = h("p", { class: "leise", style: { marginTop: "10px" } });
   const seg = h("div", { class: "segmente zr", role: "group", "aria-label": "Zeitraum des Berichts" });
-  const auswahl = { blutdruck: true, protokoll: true, ekg: true, ekgKurven: true, herz: true, koerper: true, schlaf: true, aktivitaet: true, aktivitaetenliste: false, erholung: true, ...(g.abschnitte || {}) };
+  const auswahl = { blutdruck: true, protokoll: true, ekg: true, herz: true, koerper: true, schlaf: true, aktivitaet: true, aktivitaetenliste: false, erholung: true, ...(g.abschnitte || {}) };
   const optionenBox = h("div", { class: "optionen" });
   const zeitraumJetzt = () => (zr === "frei" ? [vonFeld.value || isoMinus(90), bisFeld.value || heute].sort() : [isoMinus(+zr - 1), heute]);
   let verfuegbar = {};
@@ -3159,8 +3159,9 @@ function standZeigen() {
   let art = "";
   if (liste.some((x) => x.anmeldung_noetig || x.ok === false)) art = "fehler";
   else if (liste.some((x) => x.fehler) || stundenSeitAbruf() > 3) art = "warnung";
-  STAND.replaceChildren(h("span", { class: `stand-punkt ${art}`, "aria-hidden": "true" }), h("span", null, vorZeit(Daten.index.stand)));
-  STAND.setAttribute("aria-label", `Datenstand ${vorZeit(Daten.index.stand)}${art ? ", bitte Status prüfen" : ""}`);
+  STAND.replaceChildren(h("span", { class: `stand-punkt ${art}`, "aria-hidden": "true" }), h("span", null, vorZeit(Daten.index.stand)),
+    h("span", { class: "stand-version" }, `v${APP_VERSION}`));
+  STAND.setAttribute("aria-label", `Datenstand ${vorZeit(Daten.index.stand)}, App-Version ${APP_VERSION}${art ? ", bitte Status prüfen" : ""}`);
 }
 function navMarkieren(ziel) {
   const haupt = { aktivitaet: "sport", ekg: "herz" }[ziel] || ziel;
@@ -3190,6 +3191,7 @@ async function route() {
   document.title = ergebnis.titel === "Heute" ? "Gesundheit" : `${ergebnis.titel} – Gesundheit`;
   KOPF_ZURUECK.hidden = !ergebnis.zurueck;
   if (ergebnis.zurueck) KOPF_ZURUECK.href = ergebnis.zurueck;
+  KOPF.classList.toggle("startseite", ansicht === "heute"); // Versionsnummer am Handy nur auf der Startseite
   MAIN.replaceChildren(...ergebnis.knoten.flat().filter((k) => k != null && k !== false));
   const auftraege = NACH.splice(0);
   requestAnimationFrame(() => {
@@ -3257,7 +3259,8 @@ function tor(fehlertext) {
     h("p", null, "Den QR-Code zeigt dir das Einrichtungsfenster auf dem Chromebook im letzten Schritt."),
     h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: scannen }, icon("kamera", 20), "QR-Code scannen")),
     kamera, meldung, feld,
-    h("div", { class: "knopf-zeile" }, h("button", { class: "knopf zweit", type: "button", onclick: () => uebernehmen(feld.value) }, "Schlüssel übernehmen")))));
+    h("div", { class: "knopf-zeile" }, h("button", { class: "knopf zweit", type: "button", onclick: () => uebernehmen(feld.value) }, "Schlüssel übernehmen")),
+    h("p", { class: "tor-version" }, `App-Version ${APP_VERSION}`))));
 }
 
 // ======================================================================

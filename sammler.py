@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 APP = "GesundheitsApp"
-VERSION = "1.2"
+VERSION = "1.2.2"
 STANDARD_ZEITZONE = "Europe/Berlin"
 UTC = timezone.utc
 
@@ -888,13 +888,7 @@ class WithingsSammler:
     def messungen(self) -> None:
         gruppen: list = []
         gruppen += self.w.alle_seiten("measure", {"action": "getmeas", "category": 1}, "measuregrps")
-        try:
-            gruppen += self.w.alle_seiten("measure", {"action": "getmeas", "category": 1,
-                                                       "meastypes": WITHINGS_TYPEN_ERWEITERT}, "measuregrps")
-        except (AnmeldungNoetig, Gebremst):
-            raise
-        except Exception as e:
-            self.bericht.fehler("Withings erweiterte Messtypen", e)
+        gruppen += self._erweiterte_messungen()
 
         alt = self.ablage.lesen("d/withings.enc") or {}
         modelle: list[str] = list(alt.get("modelle") or [])
@@ -939,6 +933,34 @@ class WithingsSammler:
             "messungen": neu, "modelle": modelle, "kommentare": kommentare,
             "stand": int(time.time()),
         })
+
+    def _erweiterte_messungen(self) -> list:
+        """Neuere Messtypen (Viszeralfett, Grundumsatz, Segmente, Nerven ...) liefert Withings nur auf ausdrückliche
+        Anfrage. Lehnt Withings die gesammelte Anfrage ab, werden die Typen einzeln geholt; abgelehnte Typen
+        bleiben danach außen vor, damit die gesammelte Anfrage wieder klappt."""
+        aus = {str(t) for t in (self.z.get("typen_abgelehnt") or [])}
+        typen = [t for t in WITHINGS_TYPEN_ERWEITERT.split(",") if t not in aus]
+        try:
+            return self.w.alle_seiten("measure", {"action": "getmeas", "category": 1, "meastypes": ",".join(typen)}, "measuregrps")
+        except (AnmeldungNoetig, Gebremst):
+            raise
+        except Exception as e:
+            self.bericht.privat(f"Withings lehnt die erweiterten Messtypen gesammelt ab ({e}) – hole sie einzeln", "warnung")
+        gruppen: list = []
+        abgelehnt: list[str] = []
+        for typ in typen:
+            try:
+                gruppen += self.w.alle_seiten("measure", {"action": "getmeas", "category": 1, "meastype": typ}, "measuregrps")
+            except (AnmeldungNoetig, Gebremst):
+                raise
+            except Exception:
+                abgelehnt.append(typ)
+        if abgelehnt and len(abgelehnt) < len(typen):
+            self.z["typen_abgelehnt"] = sorted(aus | set(abgelehnt), key=int)
+            self.bericht.privat(f"Withings kennt diese Messtypen nicht: {', '.join(abgelehnt)} – sie werden künftig nicht mehr abgefragt")
+        elif abgelehnt:
+            self.bericht.fehler("Withings erweiterte Messtypen", WithingsFehler("Withings hat alle erweiterten Messtypen abgelehnt"))
+        return gruppen
 
     def ekg(self) -> None:
         liste = self.w.alle_seiten("v2/heart", {"action": "list", "startdate": 1262304000,
