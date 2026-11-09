@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 APP = "GesundheitsApp"
-VERSION = "1.2.5"
+VERSION = "1.2.6"
 STANDARD_ZEITZONE = "Europe/Berlin"
 UTC = timezone.utc
 
@@ -73,11 +73,6 @@ SCHLAF_FELDER = (
     "mvt_active_duration,mvt_score_avg,night_events,out_of_bed_count,remsleepduration,"
     "rr_average,rr_min,rr_max,sleep_score,snoring,snoringepisodecount,wakeupcount,"
     "wakeupduration,withings_index"
-)
-TRAINING_FELDER = (
-    "calories,intensity,manual_distance,manual_calories,hr_average,hr_min,hr_max,"
-    "hr_zone_0,hr_zone_1,hr_zone_2,hr_zone_3,pause_duration,algo_pause_duration,"
-    "spo2_average,steps,distance,elevation,pool_laps,strokes,pool_length"
 )
 
 
@@ -543,6 +538,17 @@ class Ablage:
         self._neu = {p for p in self._neu if nur and not p.startswith(nur)}
         return geschrieben
 
+    def entfernen(self, pfad: str) -> bool:
+        """Eine Datei, die nicht mehr gebraucht wird, aus der Ablage loeschen. True, wenn es sie gab."""
+        self._cache.pop(pfad, None)
+        self._hash.pop(pfad, None)
+        self._neu.discard(pfad)
+        datei = self.ordner / pfad
+        if datei.exists():
+            datei.unlink()
+            return True
+        return False
+
     def dateien(self) -> dict[str, str]:
         """Pfad -> Kurzversion (aendert sich nur, wenn sich der Inhalt aendert)."""
         ergebnis = {}
@@ -882,7 +888,10 @@ class WithingsSammler:
         self._schritt("EKG", self.ekg)
         self._schritt("Aktivität", lambda: self.tageswerte("aktivitaet"))
         self._schritt("Schlaf", lambda: self.tageswerte("schlaf"))
-        self._schritt("Trainings", self.trainings)
+        # Trainings kommen nur von Garmin (seit 1.2.6); früher geholte Withings-Trainings werden entfernt
+        if self.ablage.entfernen("d/withings_trainings.enc"):
+            self.bericht.privat("Withings-Trainings entfernt – Trainings kommen nur noch von Garmin")
+        self.z.pop("training_seit", None)
         if time.time() - float(self.z.get("info_zuletzt", 0)) > 6 * STUNDE:
             self._schritt("Geräte", self.info)
             self.z["info_zuletzt"] = time.time()
@@ -1092,32 +1101,6 @@ class WithingsSammler:
                 self.tage.setzen(f"w.{art}.{k}", d, v)
             self.neu["tage"] += 1
         self.z[f"{art}_seit"] = jetzt
-
-    def trainings(self) -> None:
-        params = {"action": "getworkouts", "data_fields": TRAINING_FELDER}
-        seit = self.z.get("training_seit")
-        if seit:
-            params["lastupdate"] = int(seit) - 2 * STUNDE
-        else:
-            params["startdateymd"] = "2009-01-01"
-            params["enddateymd"] = (datetime.now(self.zz).date() + timedelta(days=1)).isoformat()
-        jetzt = time.time()
-        try:
-            serie = self.w.alle_seiten("v2/measure", params, "series")
-        except WithingsFehler:
-            serie = self.w.alle_seiten("v2/measure", {k: v for k, v in params.items() if k != "data_fields"}, "series")
-        alt = self.ablage.lesen("d/withings_trainings.enc") or {}
-        alle = {str(t.get("id")): t for t in alt.get("liste") or []}
-        for t in serie:
-            if isinstance(t, dict) and t.get("id") is not None:
-                alle[str(t["id"])] = {
-                    "id": t.get("id"), "kategorie": t.get("category"), "start": t.get("startdate"),
-                    "ende": t.get("enddate"), "modell": t.get("model"), "daten": t.get("data") or {},
-                }
-        if alle or alt:
-            self.ablage.schreiben("d/withings_trainings.enc",
-                                  {"liste": sorted(alle.values(), key=lambda t: -(t.get("start") or 0))})
-        self.z["training_seit"] = jetzt
 
     def info(self) -> None:
         info = dict(self.ablage.lesen("d/withings_info.enc") or {})

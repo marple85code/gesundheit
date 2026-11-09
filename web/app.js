@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2.5";
+const APP_VERSION = "1.2.6";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -289,7 +289,6 @@ const Daten = {
     return w;
   },
   async aktivitaeten() { return ((await this.datei("d/aktivitaeten.enc")) || {}).liste || []; },
-  async withingsTrainings() { return ((await this.datei("d/withings_trainings.enc")) || {}).liste || []; },
   async ekg() { return ((await this.datei("d/ekg.enc")) || {}).liste || []; },
   async info(quelle) { return (await this.datei(`d/${quelle}_info.enc`)) || {}; },
   async tag(iso) { return this.datei(`d/tag/${iso}.enc`); },
@@ -1796,6 +1795,10 @@ async function ansichtKoerper() {
       } })));
   }
 
+  // ---- Muskeln und Fett als Körperfigur: immer sichtbar, die Einzelwerte je Bereich weiter unten zum Aufklappen
+  const mf = await muskelFettAbschnitte(w);
+  if (mf.figur) knoten.push(mf.figur);
+
   // ---- Zusammensetzung (letzte vollständige Messung)
   const letzteVoll = letzter(wReihe(w, 76));
   if (letzteVoll) {
@@ -1857,8 +1860,8 @@ async function ansichtKoerper() {
       befundBox([bf.fett, bf.bmi, bf.muskel, bf.mager, bf.viszeral])));
   }
 
-  // ---- Körperregionen
-  if (letzter(wReihe(w, 175, 12)) || letzter(wReihe(w, 174, 12))) knoten.push(await segmentAbschnitt(w));
+  // ---- Körperregionen: Tabelle, Seitenvergleich und Verlauf (zum Aufklappen)
+  if (mf.details) knoten.push(mf.details);
 
   // ---- Verlauf aller Körperwerte
   const typen = [6, 76, 8, 5, 77, 88, 170, 226, 227, 168, 169].filter((t_) => wReihe(w, t_).length > 1);
@@ -1914,19 +1917,20 @@ function koerperFussnote(zonen, p, g, glied) {
   return text;
 }
 
-// ---- Körperregionen wie in der Withings-App: Muskel- und Fettmasse für Arme, Beine und Rumpf
+// ---- Muskeln und Fett als Körperfigur, dazu die Werte je Körperbereich wie in der Withings-App
 const REGIONEN = [["rumpf", 12, "Rumpf"], ["armR", 2, "Arm rechts"], ["armL", 3, "Arm links"], ["beinR", 11, "Bein rechts"], ["beinL", 10, "Bein links"]];
-// Einordnung je Bereich: Grün optimal, Blau gut, Rot schlecht (auch bei Rot-Grün-Sehschwäche unterscheidbar geprüft)
+// Einordnung je Bereich: Grün gut, Blau mittel, Rot schlecht – kräftige, leuchtende Farben, hell und dunkel gleich.
+// Grün und Rot bleiben auch bei Rot-Grün-Sehschwäche unterscheidbar (geprüft); die Legende nennt zusätzlich die Bereiche.
 const REGION_FARBEN = {
-  hell: { optimal: "#3aa655", gut: "#2569c4", schlecht: "#c62f2f", ohne: "#a7b1b4" },
-  dunkel: { optimal: "#3aa655", gut: "#3987e5", schlecht: "#b83a3a", ohne: "#56656b" },
+  hell: { gut: "#00c853", mittel: "#2962ff", schlecht: "#e8112d", ohne: "#a7b1b4" },
+  dunkel: { gut: "#00c853", mittel: "#2962ff", schlecht: "#e8112d", ohne: "#56656b" },
 };
-const REGION_STUFEN = ["optimal", "gut", "schlecht"];
+const REGION_STUFEN = ["gut", "mittel", "schlecht"];
 /** Maßstab für die Farben. Für einzelne Körperbereiche gibt es keine ärztlichen Normwerte; die Farben übertragen
     deshalb die Normen für den ganzen Körper:
     Fett: Normalbereich des Körperfettanteils nach Gallagher und Kollegen (Alter, Geschlecht).
     Muskeln: Untergrenze der fettfreien Masse nach ESPEN (15 bzw. 17 kg/m²), über das Verhältnis von Muskeln zu fettfreier
-    Masse dieser Messung in Muskeln umgerechnet und als Anteil am Gewicht ausgedrückt; ab 15 % darüber zählt es als optimal. */
+    Masse dieser Messung in Muskeln umgerechnet und als Anteil am Gewicht ausgedrückt; ab 15 % darüber zählt es als gut. */
 function regionMassstab(modus, p, gewicht, muskelJeMager = null) {
   if (modus === "fett") {
     const f = fettNorm(p);
@@ -1942,8 +1946,8 @@ function regionMassstab(modus, p, gewicht, muskelJeMager = null) {
 }
 function regionEinordnung(modus, anteil, m) {
   if (anteil == null || !m) return null;
-  if (modus === "fett") return anteil >= m.b ? "schlecht" : anteil > m.mitte || anteil < m.a ? "gut" : "optimal";
-  return anteil < m.a ? "schlecht" : anteil < m.mitte ? "gut" : "optimal";
+  if (modus === "fett") return anteil >= m.b ? "schlecht" : anteil > m.mitte || anteil < m.a ? "mittel" : "gut";
+  return anteil < m.a ? "schlecht" : anteil < m.mitte ? "mittel" : "gut";
 }
 function regionFarbe(stufe) { return REGION_FARBEN[istDunkel() ? "dunkel" : "hell"][stufe || "ohne"]; }
 function leuchtdichte(hex) {
@@ -1952,31 +1956,53 @@ function leuchtdichte(hex) {
 }
 /** Schrift auf einer Fläche: weiß, wenn das gut lesbar ist (Kontrast ab 4,5), sonst dunkel */
 function schriftAuf(hex) { return 1.05 / (leuchtdichte(hex) + 0.05) >= 4.5 ? "#ffffff" : "#12262e"; }
-async function segmentAbschnitt(w) {
-  let modus = speicher.get("gesundheit.region") === "fett" ? "fett" : "muskel";
+/** Muskeln und Fett als Körperfigur (immer sichtbar) und die Einzelwerte je Körperbereich (zum Aufklappen).
+ *  Gibt es keine Messung mit Griff, zeigt die Figur den ganzen Körper in einer Farbe. */
+async function muskelFettAbschnitte(w) {
   const p = personAus(await Daten.info("garmin"), w);
-  const letzte = letzter(wReihe(w, 175, 12)) || letzter(wReihe(w, 174, 12));
-  const g = wGruppe(w, letzte[2]);
-  const v = (typ, pos) => (zahlOk(g[`${typ}.${pos}`]) ? g[`${typ}.${pos}`] : null);
+  const seg = letzter(wReihe(w, 175, 12)) || letzter(wReihe(w, 174, 12)); // Messung mit Griff: Werte je Bereich
+  const voll = letzter(wReihe(w, 76)) || letzter(wReihe(w, 6)); // letzte Messung des ganzen Körpers
+  if (!seg && !voll) return {};
+  const g = wGruppe(w, (seg || voll)[2]);
+  const v = (typ, pos) => (seg && zahlOk(g[`${typ}.${pos}`]) ? g[`${typ}.${pos}`] : null);
   const gesamt = (pos) => (v(174, pos) != null && v(173, pos) != null ? v(174, pos) + v(173, pos) : null);
   const fettAnteil = (pos) => (gesamt(pos) ? (v(174, pos) / gesamt(pos)) * 100 : null);
   const muskelAnteil = (pos) => (gesamt(pos) && v(175, pos) != null ? (v(175, pos) / gesamt(pos)) * 100 : null);
-  const vor30 = (typ, pos) => vorTagen(wReihe(w, typ, pos), 30, letzte[0]);
-  const umschalter = h("div", { class: "segmente", role: "group", "aria-label": "Anzeige" });
-  const figurBox = h("div", { class: "koerper-feld" });
+  const vor30 = (typ, pos) => vorTagen(wReihe(w, typ, pos), 30, seg[0]);
+  const da = seg
+    ? { muskel: REGIONEN.some(([, p_]) => v(175, p_) != null), fett: REGIONEN.some(([, p_]) => v(174, p_) != null) }
+    : { muskel: zahlOk(g[76]) && zahlOk(g[1]) && g[1] > 0, fett: zahlOk(g[6]) };
+  if (!da.muskel && !da.fett) return {};
+  let modus = speicher.get("gesundheit.region") === "fett" ? "fett" : "muskel";
+  if (!da[modus]) modus = modus === "fett" ? "muskel" : "fett";
   let verlaufKarte = null;
+  const knoepfe = () => [["muskel", "Muskeln"], ["fett", "Fett"]].map(([m, name]) => h("button", { type: "button", "aria-pressed": String(m === modus), disabled: !da[m] || null,
+    onclick: () => { if (m !== modus) { modus = m; speicher.set("gesundheit.region", m); zeichne(); if (verlaufKarte) verlaufKarte.neuLaden(); } } }, name));
+  const umschalterFigur = h("div", { class: "segmente", role: "group", "aria-label": "Muskeln oder Fett zeigen" });
+  const umschalterDetail = seg ? h("div", { class: "segmente", role: "group", "aria-label": "Muskeln oder Fett zeigen" }) : null;
+  const figurBox = h("div", { class: "koerper-feld figur-feld" });
+  const detailBox = seg ? h("div") : null;
   const zeichne = () => {
-    umschalter.replaceChildren(...[["muskel", "Muskelmasse"], ["fett", "Fettmasse"]].map(([m, name]) => h("button", { type: "button", "aria-pressed": String(m === modus),
-      disabled: (m === "muskel" ? !REGIONEN.some(([, p_]) => v(175, p_) != null) : !REGIONEN.some(([, p_]) => v(174, p_) != null)) || null,
-      onclick: () => { if (m !== modus) { modus = m; speicher.set("gesundheit.region", m); zeichne(); if (verlaufKarte) verlaufKarte.neuLaden(); } } }, name)));
-    const typ = modus === "fett" ? 174 : 175;
-    const anteil = modus === "fett" ? fettAnteil : muskelAnteil;
+    umschalterFigur.replaceChildren(...knoepfe());
+    if (umschalterDetail) umschalterDetail.replaceChildren(...knoepfe());
     const massstab = regionMassstab(modus, p, g[1], g[76] != null && g[5] ? g[76] / g[5] : null);
-    const werte = {};
-    for (const [k, pos, name] of REGIONEN) {
-      const a_ = anteil(pos);
-      werte[k] = { wert: v(typ, pos), anteil: a_, name, stufe: v(typ, pos) != null ? regionEinordnung(modus, a_, massstab) : null };
+    let werte = null, ganz = null;
+    if (seg) {
+      const typ = modus === "fett" ? 174 : 175;
+      const anteil = modus === "fett" ? fettAnteil : muskelAnteil;
+      werte = {};
+      for (const [k, pos, name] of REGIONEN) {
+        const a_ = anteil(pos);
+        werte[k] = { wert: v(typ, pos), anteil: a_, name, stufe: v(typ, pos) != null ? regionEinordnung(modus, a_, massstab) : null };
+      }
+    } else {
+      const wert = modus === "fett" ? (zahlOk(g[8]) ? g[8] : null) : g[76];
+      const anteil = modus === "fett" ? g[6] : (g[76] / g[1]) * 100;
+      ganz = { wert, anteil, name: "Ganzer Körper", stufe: regionEinordnung(modus, anteil, massstab) };
     }
+    figurBox.replaceChildren(koerperFigur(werte, modus, ganz), h("div", { class: "figur-legende" }, regionLegende(modus, massstab, p, werte, ganz)));
+    if (!seg) return;
+    const typ = modus === "fett" ? 174 : 175;
     const zeile = (k, name, pos) => {
       const d = v(typ, pos) != null && vor30(typ, pos) != null ? v(typ, pos) - vor30(typ, pos) : null;
       const st = werte[k].stufe;
@@ -1994,17 +2020,20 @@ async function segmentAbschnitt(w) {
       const ausgeglichen = Math.abs(diff) < 3;
       return { name, wert: ausgeglichen ? "ausgeglichen" : `links ${diff > 0 ? "mehr" : "weniger"}`, neben: `${vorzeichen(diff, 1)} % (links ${zahl(l, 2)} kg, rechts ${zahl(r, 2)} kg)` };
     };
-    figurBox.replaceChildren(
-      koerperFigur(werte, modus),
-      h("div", null,
-        regionLegende(modus, massstab, p),
-        h("div", { class: "tabellen-rahmen region-tabelle" }, h("table", { class: "tabelle" },
-          h("thead", null, h("tr", null, h("th", null, "Bereich"), h("th", null, "Muskeln"), h("th", null, "Fett"), h("th", null, modus === "fett" ? "Fettanteil" : "Muskelanteil"),
-            h("th", { title: `Veränderung der ${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in 30 Tagen` }, "± 30 Tage"))),
-          h("tbody", null, REGIONEN.map(([k, pos, name]) => zeile(k, name, pos))))),
-        werteListe([seiten(3, 2, `Arme, ${modus === "fett" ? "Fett" : "Muskeln"}`), seiten(10, 11, `Beine, ${modus === "fett" ? "Fett" : "Muskeln"}`)])));
+    detailBox.replaceChildren(
+      h("div", { class: "tabellen-rahmen region-tabelle" }, h("table", { class: "tabelle" },
+        h("thead", null, h("tr", null, h("th", null, "Bereich"), h("th", null, "Muskeln"), h("th", null, "Fett"), h("th", null, modus === "fett" ? "Fettanteil" : "Muskelanteil"),
+          h("th", { title: `Veränderung der ${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in 30 Tagen` }, "± 30 Tage"))),
+        h("tbody", null, REGIONEN.map(([k, pos, name]) => zeile(k, name, pos))))),
+      werteListe([seiten(3, 2, `Arme, ${modus === "fett" ? "Fett" : "Muskeln"}`), seiten(10, 11, `Beine, ${modus === "fett" ? "Fett" : "Muskeln"}`)]));
   };
   zeichne();
+  const wann = datum(isoAusMs((seg || voll)[0]), "kurz");
+  const figur = abschnitt("Muskeln und Fett", seg
+    ? `Arme, Beine und Rumpf aus der Messung mit Griff vom ${wann}`
+    : `Ganzer Körper, Messung vom ${wann} – Arme, Beine und Rumpf einzeln misst die Body Scan, wenn du beim Wiegen den Griff mit beiden Händen hältst.`,
+  umschalterFigur, figurBox);
+  if (!seg) return { figur };
   verlaufKarte = await verlauf({ id: "regionen", titel: "Verlauf je Körperbereich", standard: "182",
     auswahl: [{ id: "arme", name: "Arme" }, { id: "beine", name: "Beine" }, { id: "rumpf", name: "Rumpf" }],
     laden: ({ von, wochen, wahl }) => {
@@ -2016,30 +2045,42 @@ async function segmentAbschnitt(w) {
       });
       return { serien, opt: { wochen, minSpanne: { arme: 1, beine: 2, rumpf: 3 }[wahl] }, fussnote: `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in kg, je Messung der Body Scan mit Griff.` };
     } });
-  return klappAbschnitt("regionen", "Körperregionen", `Muskel- und Fettmasse von Armen, Beinen und Rumpf, Messung vom ${datum(isoAusMs(letzte[0]), "kurz")}`,
-    umschalter, figurBox,
+  const details = klappAbschnitt("regionen", "Körperregionen", `Werte, Seitenvergleich und Verlauf für Arme, Beine und Rumpf, Messung vom ${wann}`,
+    umschalterDetail, detailBox,
     h("p", { class: "fussnote" }, "Die Body Scan misst die Körperregionen, wenn du den Griff mit beiden Händen hältst. „± 30 Tage“ ist die Veränderung gegenüber der Messung vor rund einem Monat. Für einzelne Körperbereiche gibt es keine ärztlichen Normwerte; die Farben übertragen deshalb die Normen für den ganzen Körper und dienen der Orientierung."),
     verlaufKarte);
+  return { figur, details };
 }
 
-/** Legende zur Figur: drei Stufen mit ihren Grenzen, oder warum es keine Farben gibt */
-function regionLegende(modus, m, p) {
+/** Legende zur Figur: die drei Stufen mit ihren Grenzen und welche Bereiche gerade darin liegen, oder warum es keine Farben gibt */
+function regionLegende(modus, m, p, werte = null, ganz = null) {
   if (!m) {
     const fehlend = [p.geschlecht ? null : "Geschlecht", modus === "fett" && p.alter == null ? "Alter" : null, modus !== "fett" && !p.groesse ? "Größe" : null].filter(Boolean);
     return h("p", { class: "region-legende leise" }, fehlend.length
-      ? `Für die Einordnung in optimal, gut und schlecht ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`
-      : "Für die Einordnung in optimal, gut und schlecht fehlt das Gewicht dieser Messung.");
+      ? `Für die Einordnung in gut, mittel und schlecht ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`
+      : "Für die Einordnung in gut, mittel und schlecht fehlt das Gewicht dieser Messung.");
   }
   const f = (x) => zahl(x, Number.isInteger(x) ? 0 : 1);
   const grenzen = modus === "fett"
-    ? { optimal: `${f(m.a)}–${f(m.mitte)} %`, gut: `${f(m.mitte)}–${zahl(m.b - 0.1, 1)} %`, schlecht: `ab ${f(m.b)} %` }
-    : { optimal: `ab ${f(m.mitte)} %`, gut: `${f(m.a)}–${f(m.mitte)} %`, schlecht: `unter ${f(m.a)} %` };
+    ? { gut: `${f(m.a)}–${f(m.mitte)} %`, mittel: `${f(m.mitte)}–${zahl(m.b - 0.1, 1)} %`, schlecht: `ab ${f(m.b)} %` }
+    : { gut: `ab ${f(m.mitte)} %`, mittel: `${f(m.a)}–${f(m.mitte)} %`, schlecht: `unter ${f(m.a)} %` };
+  const bereiche = (st) => {
+    if (ganz) return ganz.stufe === st ? ["ganzer Körper"] : [];
+    const n = Object.values(werte || {}).filter((x) => x.stufe === st).map((x) => x.name);
+    const paar = (a, b, beide) => (n.includes(a) && n.includes(b) ? [beide] : n.filter((x) => x === a || x === b));
+    return [...n.filter((x) => x === "Rumpf"), ...paar("Arm rechts", "Arm links", "beide Arme"), ...paar("Bein rechts", "Bein links", "beide Beine")];
+  };
   const wer = p.geschlecht === "w" ? "Frauen" : "Männer";
+  const wovon = ganz ? "des ganzen Körpers" : "des Bereichs";
   const erklaerung = modus === "fett"
-    ? `Fettanteil des Bereichs, gemessen am Normalbereich des Körperfettanteils nach Gallagher und Kollegen für ${wer} ${m.gruppe} (${f(m.a)}–${zahl(m.b - 0.1, 1)} %); ab ${f(m.b)} % gilt er als erhöht. Unter ${f(m.a)} % zeigt die Figur Blau.`
-    : `Muskelanteil des Bereichs. Maßstab ist die Untergrenze der fettfreien Masse nach ESPEN (${zahl(m.index)} kg/m²), auf Muskeln und dein Gewicht von ${zahl(m.gewicht, 1)} kg umgerechnet: ${zahl(m.kgA, 1)} kg oder ${f(m.a)} %. Ab 15 % darüber zählt es als optimal.`;
+    ? `Fettanteil ${wovon}, gemessen am Normalbereich des Körperfettanteils nach Gallagher und Kollegen für ${wer} ${m.gruppe} (${f(m.a)}–${zahl(m.b - 0.1, 1)} %); ab ${f(m.b)} % gilt er als erhöht. Unter ${f(m.a)} % zeigt die Figur ebenfalls Blau.`
+    : `Muskelanteil ${wovon}. Maßstab ist die Untergrenze der fettfreien Masse nach ESPEN (${zahl(m.index)} kg/m²), auf Muskeln und dein Gewicht von ${zahl(m.gewicht, 1)} kg umgerechnet: ${zahl(m.kgA, 1)} kg oder ${f(m.a)} %. Ab 15 % darüber zählt es als gut.`;
   return h("div", { class: "region-legende" },
-    h("div", { class: "region-stufen" }, REGION_STUFEN.map((st) => h("span", null, h("i", { style: { background: regionFarbe(st) } }), h("b", null, st), ` ${grenzen[st]}`))),
+    h("ul", { class: "region-liste" }, REGION_STUFEN.map((st) => {
+      const b = bereiche(st);
+      return h("li", null, h("i", { style: { background: regionFarbe(st) } }), h("b", null, st), h("span", { class: "grenze" }, grenzen[st]),
+        b.length ? h("span", { class: "bereiche" }, b.join(", ")) : null);
+    })),
     h("p", null, erklaerung));
 }
 
@@ -2047,12 +2088,15 @@ function istDunkel() {
   const t_ = document.documentElement.getAttribute("data-theme");
   return t_ ? t_ === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
 }
-/** Körperfigur von vorn mit fünf Bereichen; Farbe nach Einordnung (optimal, gut, schlecht), Beschriftung mit kg und Anteil */
-function koerperFigur(werte, modus) {
+/** Körperfigur von vorn mit fünf Bereichen; Farbe nach Einordnung (gut, mittel, schlecht), Beschriftung mit kg und Anteil.
+ *  Mit „ganz“ (keine Messung mit Griff) zeigt sie den ganzen Körper in einer Farbe. */
+function koerperFigur(werte, modus, ganz = null) {
   const was = modus === "fett" ? "Fett" : "Muskeln";
-  const beschreibung = (x) => (x.wert != null ? `${zahl(x.wert, 2)} kg${x.anteil != null ? `, ${zahl(x.anteil)} % ${was}` : ""}${x.stufe ? `, ${x.stufe}` : ""}` : "keine Messung");
+  const beschreibung = (x) => (x.wert != null ? `${zahl(x.wert, x.wert >= 10 ? 1 : 2)} kg${x.anteil != null ? `, ${zahl(x.anteil)} % ${was}` : ""}${x.stufe ? `, ${x.stufe}` : ""}`
+    : x.anteil != null ? `${zahl(x.anteil, 1)} % ${was}${x.stufe ? `, ${x.stufe}` : ""}` : "keine Messung");
   const svg = s("svg", { class: "koerperfigur", viewBox: "0 0 440 600", role: "img",
-    "aria-label": `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} je Körperbereich: ${Object.values(werte).map((x) => `${x.name} ${beschreibung(x)}`).join("; ")}` });
+    "aria-label": ganz ? `${was} des ganzen Körpers: ${beschreibung(ganz)}`
+      : `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} je Körperbereich: ${Object.values(werte).map((x) => `${x.name} ${beschreibung(x)}`).join("; ")}` });
   const FORMEN = {
     rumpf: "M184 104 C172 110 160 113 152 118 C150 132 151 146 153 160 C155 196 160 222 160 246 C160 268 149 284 147 301 C166 316 184 328 200 333 C216 328 234 316 253 301 C251 284 240 268 240 246 C240 222 245 196 247 160 C249 146 250 132 248 118 C240 113 228 110 216 104 C208 109 192 109 184 104 Z",
     armR: "M148 116 C132 118 122 128 120 144 L113 204 C111 218 109 230 108 240 L100 300 C99 308 97 314 96 320 C92 334 91 348 96 360 C100 368 108 368 112 360 C115 352 114 336 115 322 L124 266 C126 256 129 246 131 236 L140 184 C142 172 145 164 148 158 C146 144 146 130 148 116 Z",
@@ -2064,8 +2108,9 @@ function koerperFigur(werte, modus) {
   svg.append(koerper);
   koerper.append(s("ellipse", { cx: 200, cy: 54, rx: 28, ry: 35, class: "kopf-form" }), s("path", { d: "M188 82 L212 82 L214 110 L186 110 Z", class: "kopf-form" }));
   for (const [k, d] of Object.entries(FORMEN)) {
-    const x = werte[k];
-    const p_ = s("path", { d, class: "segment", fill: x && x.wert != null ? regionFarbe(x.stufe) : "var(--blatt-2)" });
+    const x = ganz || werte[k];
+    const gemessen = x && (x.wert != null || x.anteil != null);
+    const p_ = s("path", { d, class: "segment", fill: gemessen ? regionFarbe(x.stufe) : "var(--blatt-2)" });
     p_.append(s("title", null, `${x.name}: ${beschreibung(x)}`));
     koerper.append(p_);
   }
@@ -2078,15 +2123,18 @@ function koerperFigur(werte, modus) {
     gr.append(s("text", { x: x0, y: y + 18, "text-anchor": anker, class: "name" }, unter(x)));
     return gr;
   };
-  const r = werte.rumpf;
+  const r = ganz || werte.rumpf;
+  const gemessen = r.wert != null || r.anteil != null;
   const innen = schriftAuf(regionFarbe(r.stufe));
   const rumpf = s("g", { class: "etikett" });
-  rumpf.append(s("text", { x: 220, y: 190, "text-anchor": "middle", class: "wert", style: `fill:${r.wert != null ? innen : "var(--tinte)"}` }, text(r)));
-  rumpf.append(s("text", { x: 220, y: 208, "text-anchor": "middle", class: "name", style: `fill:${r.wert != null ? innen : "var(--tinte-2)"}` }, r.wert != null && r.anteil != null ? `Rumpf, ${zahl(r.anteil)} %` : "Rumpf"));
-  svg.append(rumpf,
-    etikett("armR", 4, 208, "start"), etikett("armL", 436, 208, "end"),
-    etikett("beinR", 4, 414, "start"), etikett("beinL", 436, 414, "end"),
-    s("text", { x: 220, y: 596, "text-anchor": "middle", class: "seiten-hinweis" }, "Ansicht von vorn"));
+  const oben = r.wert != null ? text(r) : r.anteil != null ? `${zahl(r.anteil, 1)} %` : "–";
+  const unten = ganz ? (r.wert != null && r.anteil != null ? `ganzer Körper, ${zahl(r.anteil)} %` : "ganzer Körper")
+    : r.wert != null && r.anteil != null ? `Rumpf, ${zahl(r.anteil)} %` : "Rumpf";
+  rumpf.append(s("text", { x: 220, y: 190, "text-anchor": "middle", class: "wert", style: `fill:${gemessen ? innen : "var(--tinte)"}` }, oben));
+  rumpf.append(s("text", { x: 220, y: 208, "text-anchor": "middle", class: "name", style: `fill:${gemessen ? innen : "var(--tinte-2)"}` }, unten));
+  svg.append(rumpf);
+  if (!ganz) svg.append(etikett("armR", 4, 208, "start"), etikett("armL", 436, 208, "end"), etikett("beinR", 4, 414, "start"), etikett("beinL", 436, 414, "end"));
+  svg.append(s("text", { x: 220, y: 596, "text-anchor": "middle", class: "seiten-hinweis" }, "Ansicht von vorn"));
   return svg;
 }
 
@@ -2463,7 +2511,7 @@ async function ansichtSchlaf() {
 // ======================================================================
 let sportFilter = "alle";
 async function ansichtSport() {
-  const [akt, info, wTrain] = await Promise.all([Daten.aktivitaeten(), Daten.info("garmin"), Daten.withingsTrainings()]);
+  const [akt, info] = await Promise.all([Daten.aktivitaeten(), Daten.info("garmin")]);
   const k = await kennzahlen(["schritte", "im_mod", "etagen", "aktivkcal", "vo2lauf", "vo2rad", "bereitschaft",
     "fitnessalter", "last_akut", "wochenlast", "p5k", "ausdauer", "huegel"], isoMinus(364));
   const tsText = await Daten.texte("g.trainingsstatus.trainingStatusFeedbackPhrase", isoMinus(60));
@@ -2517,12 +2565,6 @@ async function ansichtSport() {
   };
   zeigeListe();
   knoten.push(abschnitt("Aktivitäten", null, h("div", { class: "verlauf" }, h("div", { class: "verlauf-kopf" }, segBox), chipsBox, listeBox)));
-  if (wTrain.length) {
-    knoten.push(abschnitt("Trainings aus Withings", null, h("ul", { class: "liste" }, wTrain.slice(0, 50).map((t_) =>
-      h("li", null, h("div", { class: "zeile" }, h("span", { class: "symbol" }, icon("sonst")),
-        h("span", { class: "haupt" }, h("b", null, `Training (Kategorie ${t_.kategorie})`), h("span", null, DF.datumZeit.format(new Date(t_.start * 1000)))),
-        h("span", { class: "kennzahlen" }, h("div", null, h("b", null, dauer((t_.ende - t_.start), false)), h("span", null, "Dauer")))))))));
-  }
 
   // Bewegung im Alltag: ein Diagramm, der Wert wird über Chips gewählt
   const balkenTage = (r, wochen) => (wochen ? nachWochen(r) : r);
