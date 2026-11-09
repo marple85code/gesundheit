@@ -32,6 +32,69 @@ function t(s) {
 }
 
 let C, O, doc, y;
+const VERSION = "1.2.3";
+
+// Diese Hilfen gibt die App seit Version 1.2.2 mit. Eine ältere App, die nach einem Update kurz
+// diesen neueren Berichtsteil lädt, kennt sie noch nicht – dann gelten diese gleichlautenden Fassungen.
+const RUECKFALL = {
+  W_BEREICHE: {
+    fett: { w: [[39, 22, 33], [59, 24, 34], [999, 25, 36]], m: [[39, 8, 20], [59, 11, 22], [999, 13, 25]] },
+    muskel: { w: [[39, 63, 75.5], [59, 62, 73.5], [999, 60, 72.5]], m: [[39, 75, 89], [59, 73, 86], [999, 70, 84]] },
+    wasser: { w: [[999, 45, 60]], m: [[999, 50, 65]] },
+    knochen: { w: [[999, 2.5, 4]], m: [[999, 3, 5]] },
+  },
+  PWV_GRENZE: [[29, 7.1], [39, 8.0], [49, 8.6], [59, 10.0], [69, 13.1], [999, 14.6]],
+  wBereich(art, p) {
+    const tab = C.W_BEREICHE[art] && C.W_BEREICHE[art][p.geschlecht];
+    if (!tab || (p.alter == null && tab.length > 1)) return null;
+    return (tab.find(([bis]) => (p.alter ?? 0) <= bis) || tab[tab.length - 1]).slice(1);
+  },
+  spanne(a, b, einheit = "") {
+    const f = (v) => C.zahl(v, Number.isInteger(v) ? 0 : 1);
+    return `${f(a)}–${f(b)}${einheit ? ` ${einheit}` : ""}`;
+  },
+  personAus(info, w) {
+    const ud = (info.profil && info.profil.userData) || {};
+    const ui = (info.person && info.person.userInfo) || {};
+    const bio = (info.person && info.person.biometricProfile) || {};
+    const fa = info.fitnessalter || {};
+    const g = String(ud.gender || ui.genderType || ui.gender || "").toUpperCase();
+    const geschlecht = g.startsWith("F") || g.startsWith("W") ? "w" : g.startsWith("M") ? "m" : null;
+    let alter = null;
+    const m = String(ud.birthDate || ui.birthDate || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      const jetzt = new Date();
+      const vorGeburtstag = jetzt.getMonth() + 1 < +m[2] || (jetzt.getMonth() + 1 === +m[2] && jetzt.getDate() < +m[3]);
+      alter = jetzt.getFullYear() - +m[1] - (vorGeburtstag ? 1 : 0);
+    } else if (Number.isFinite(ui.age)) alter = ui.age;
+    else if (Number.isFinite(fa.chronologicalAge)) alter = fa.chronologicalAge;
+    const cm = [ud.height, bio.height].find((x) => Number.isFinite(x) && x > 100 && x < 250);
+    const wg = C.letzter(C.wReihe(w, 4));
+    const groesse = cm ? cm / 100 : wg && wg[1] > 1 && wg[1] < 2.5 ? wg[1] : null;
+    return { geschlecht, alter, groesse, fitness: fa };
+  },
+  // Bereiche wie in der Withings-App (seit App 1.2.3): Untergrenzen nach Körpergröße, in kg
+  koerperZonen(p) {
+    const ug = { w: { mager: 15.5, wasser: 10.3, knochen: 0.78 }, m: { mager: 18, wasser: 11.96, knochen: 0.91 } }[p.geschlecht];
+    if (!ug || !p.groesse) return {};
+    const h2 = p.groesse * p.groesse;
+    const mehr = (u) => ({ grenzen: [u, u * 1.25] });
+    return { mager: mehr(ug.mager * h2), muskel: mehr((ug.mager - ug.knochen) * h2), wasser: mehr(ug.wasser * h2), knochen: mehr(ug.knochen * h2) };
+  },
+  ekgKlasse(e) { // 0 unauffällig, 1 Vorhofflimmern, 2 nicht eindeutig, null ohne Auswertung
+    if (e.afib === 0 || e.afib === 1 || e.afib === 2) return e.afib;
+    const s = String(e.afib || "").toUpperCase();
+    if (!s) return null;
+    if (s.startsWith("NO_") || s.includes("SINUS") || s === "NORMAL") return 0;
+    if (s.includes("FIBRILLATION") || s.includes("AFIB")) return 1;
+    return 2;
+  },
+};
+function mitRueckfall(ctx) {
+  const c = { ...ctx };
+  for (const [name, wert] of Object.entries(RUECKFALL)) if (c[name] == null) c[name] = wert;
+  return c;
+}
 
 const DF = {
   lang: new Intl.DateTimeFormat("de-DE", { day: "numeric", month: "long", year: "numeric" }),
@@ -258,6 +321,7 @@ function afibText(e) {
   if (s.includes("POOR")) return "Aufzeichnung unzureichend";
   return C.textDeutsch(a);
 }
+function auffaellig(e) { const k = C.ekgKlasse(e); return k === 1 || k === 2; }
 
 // ---------------------------------------------------------------- Titelseite und Übersicht
 function titelseite(d) {
@@ -410,13 +474,17 @@ function uebersicht(d) {
   if (fett.length) { const [a, e] = anfangEnde(fett); koerper.push(zeile("Körperfettanteil", `${zahl(e[1], 1)} %`, fett.length > 1 ? `${pm(e[1] - a[1], 1)} Prozentpunkte` : "", bereichEinordnung("fett", e[1], p, "Körperfettanteil"))); }
   if (muskel.length) {
     const [a, e] = anfangEnde(muskel);
-    const g = C.wGruppe(d.w, e[2]);
-    const anteil = g[1] ? (e[1] / g[1]) * 100 : null;
-    koerper.push(zeile("Muskelmasse", `${zahl(e[1], 1)} kg`, muskel.length > 1 ? `${pm(e[1] - a[1], 1)} kg` : "", bereichEinordnung("muskel", anteil, p, "Muskelanteil", { nurNiedrig: true })));
+    // Wie in der Withings-App: Muskelmasse in kg, Untergrenze nach Körpergröße (der Anteil am Gewicht hinge vom Fett ab)
+    const zone = C.koerperZonen(p).muskel;
+    const eb = zone && e[1] < zone.grenzen[0]
+      ? [GRENZWERTIG, `unter dem Normalbereich der Withings-App für ${p.geschlecht === "w" ? "Frauen" : "Männer"} mit ${zahl(p.groesse * 100)} cm (ab ${zahl(zone.grenzen[0], 1)} kg)`]
+      : null;
+    koerper.push(zeile("Muskelmasse", `${zahl(e[1], 1)} kg`, muskel.length > 1 ? `${pm(e[1] - a[1], 1)} kg` : "", eb));
   }
   if (visz.length) {
     const v = C.letzter(visz)[1];
-    koerper.push(zeile("Viszeralfett", zahl(v, 1), "Index der Body Scan", v > 5 ? [GRENZWERTIG, "über 5; Withings stuft 0–5 als normal ein, darüber als hoch"] : null));
+    koerper.push(zeile("Viszeralfett", zahl(v, 1), "Index der Body Scan", v > 10 ? [AUFFAELLIG, "sehr hoch; Withings stuft bis 5 als gut ein, bis 10 als hoch, darüber als sehr hoch"]
+      : v > 5 ? [GRENZWERTIG, "hoch; Withings stuft bis 5 als gut ein, bis 10 als hoch"] : null));
   }
   if (koerper.length) { z.push(gruppe("Körper")); z.push(...koerper); }
   const schlaf = [];
@@ -521,38 +589,24 @@ async function blutdruck(d) {
 
 // ---------------------------------------------------------------- EKG
 function nahe(d, typ, ts) { const r = C.wReihe(d.w, typ).find((x) => Math.abs(x[0] - ts * 1000) < 15 * 60000); return r ? r[1] : null; }
-const EKG_ANZAHL = 5;
-const ekgTabellenHoehe = (liste) => Math.min(liste.length, EKG_ANZAHL) * 7.5;
 function ekgListe(d) {
-  // Die letzten fünf Aufzeichnungen des Zeitraums, neueste zuerst – ohne Kurven
-  const liste = [...d.ekg].sort((a, b) => b.ts - a.ts);
-  const gezeigt = liste.slice(0, EKG_ANZAHL), aelter = liste.slice(EKG_ANZAHL);
-  platz(30 + 8 + ekgTabellenHoehe(liste) + 22); // Abschnitt nicht über eine Seitengrenze teilen
-  const umfang = liste.length > EKG_ANZAHL ? `Die letzten ${EKG_ANZAHL} von ${liste.length} Einkanal-EKG-Aufzeichnungen im Zeitraum, neueste zuerst,`
-    : liste.length === 1 ? "Die einzige Einkanal-EKG-Aufzeichnung im Zeitraum" : `Alle ${liste.length} Einkanal-EKG-Aufzeichnungen im Zeitraum, neueste zuerst,`;
-  ueberschrift("EKG", `${umfang} mit der automatischen Auswertung des Geräts. Die Auswertung stammt vom Gerät und ist kein ärztlicher Befund.`);
-  const klasse = (e) => C.ekgKlasse(e);
-  tabelle(["Datum", "Uhrzeit", "Auswertung des Geräts", "Herzfrequenz", "Intervalle", "Quelle"], gezeigt.map((e) => {
+  platz(30 + 8 + Math.min(d.ekg.length, 6) * 7.5 + 12); // Überschrift nicht allein am Seitenende
+  ueberschrift("EKG", "Einkanal-EKG-Aufzeichnungen der Geräte mit deren automatischer Auswertung. Die Auswertung stammt vom Gerät und ist kein ärztlicher Befund.");
+  tabelle(["Datum", "Uhrzeit", "Auswertung des Geräts", "Herzfrequenz", "Intervalle", "Quelle"], d.ekg.map((e) => {
     const iv = [[135, "QRS"], [136, "PR"], [137, "QT"], [138, "QTc"]].map(([typ, n]) => { const v = nahe(d, typ, e.ts); return v != null ? `${n} ${zahl(v)} ms` : null; }).filter(Boolean).join(", ");
-    const k = klasse(e);
-    const stil = k === 1 || k === 2 ? { fontStyle: "bold", textColor: F.kritisch } : {};
+    const stil = auffaellig(e) ? { fontStyle: "bold", textColor: F.kritisch } : {};
     return [msDatum(e.ts * 1000), uhr(e.ts * 1000), { content: afibText(e), styles: stil }, e.hf ? `${zahl(e.hf)} bpm` : "–", iv || "–", e.q === "g" ? "Garmin" : "Withings"];
   }), { spalten: { 0: { cellWidth: 21 }, 1: { cellWidth: 14 }, 2: { cellWidth: 48 }, 3: { cellWidth: 22, halign: "right" }, 5: { cellWidth: 17 } }, schriftgroesse: 8.2, abstand: 3 });
   // Zusammenfassung für die Praxis: Vorhofflimmern oder unklare Aufzeichnungen?
   const n = (x, eins, viele) => `${x} ${x === 1 ? eins : viele}`;
-  const vhf = gezeigt.filter((e) => klasse(e) === 1).length, unklar = gezeigt.filter((e) => klasse(e) === 2).length;
+  const vhf = d.ekg.filter((e) => C.ekgKlasse(e) === 1).length, unklar = d.ekg.filter((e) => C.ekgKlasse(e) === 2).length;
   const satz = vhf
-    ? `In ${n(vhf, "dieser Aufzeichnung", "dieser Aufzeichnungen")} meldet das Gerät einen Hinweis auf Vorhofflimmern.${unklar ? ` ${n(unklar, "weitere ist", "weitere sind")} nicht eindeutig auswertbar.` : ""}`
+    ? `In ${n(vhf, "Aufzeichnung", "Aufzeichnungen")} meldet das Gerät einen Hinweis auf Vorhofflimmern.${unklar ? ` ${n(unklar, "weitere ist", "weitere sind")} nicht eindeutig auswertbar.` : ""}`
     : unklar
       ? `Kein Hinweis auf Vorhofflimmern; ${n(unklar, "Aufzeichnung ist", "Aufzeichnungen sind")} jedoch nicht eindeutig auswertbar.`
-      : `In ${gezeigt.length === 1 ? "dieser Aufzeichnung" : gezeigt.length === 2 ? "beiden Aufzeichnungen" : `allen ${gezeigt.length} Aufzeichnungen`} erkannte das Gerät kein Vorhofflimmern.`;
+      : `In ${d.ekg.length === 1 ? "dieser Aufzeichnung" : d.ekg.length === 2 ? "beiden Aufzeichnungen" : `allen ${d.ekg.length} Aufzeichnungen`} erkannte das Gerät kein Vorhofflimmern.`;
   absatz(satz, { groesse: 9.2, fett: true, farbe: vhf || unklar ? F.kritisch : F.tinte, abstand: 2 });
-  // Ältere Auffälligkeiten im Zeitraum nicht verschweigen
-  const aelterVhf = aelter.filter((e) => klasse(e) === 1);
-  if (aelterVhf.length) {
-    absatz(`Außerdem im Zeitraum: ${n(aelterVhf.length, "ältere Aufzeichnung", "ältere Aufzeichnungen")} mit Hinweis auf Vorhofflimmern (${aelterVhf.slice(0, 6).map((e) => msDatum(e.ts * 1000)).join(", ")}${aelterVhf.length > 6 ? " …" : ""}).`,
-      { groesse: 9, fett: true, farbe: F.kritisch, abstand: 2 });
-  }
+  if (O.abschnitte.ekgKurven && d.ekg.some((e) => e.kurve)) absatz("Die Kurven stehen im Anhang „EKG-Kurven“ (25 mm/s, 10 mm/mV).", { groesse: 8.4, farbe: F.tinte3 });
   y += 2;
 }
 
@@ -786,6 +840,74 @@ function aktivitaetenListe(d) {
     C.dauer(x.dauer || 0, false), x.distanz ? `${zahl(x.distanz / 1000, 1)} km` : "–", x.hf ? `${zahl(x.hf)}` : "–", x.hf_max ? `${zahl(x.hf_max)}` : "–"]),
   { spalten: { 2: rechts, 3: rechts, 4: rechts, 5: rechts }, schriftgroesse: 8.2 });
 }
+async function ekgKurven(d) {
+  const mitKurve = d.ekg.filter((e) => e.kurve);
+  // auffällige zuerst, dann die neuesten; höchstens 12
+  const auswahl = [...mitKurve.filter(auffaellig), ...mitKurve.filter((e) => !auffaellig(e)).reverse()].slice(0, 12);
+  for (const e of auswahl) {
+    let k;
+    try { k = await C.Daten.datei(`d/ekg/${e.q}-${e.id}.enc`); } catch { k = null; }
+    if (!k || !k.signal || !k.signal.length) continue;
+    neueSeite(true);
+    ekgSeite(e, k, d);
+  }
+}
+function ekgSeite(e, k, d) {
+  const bw = doc.internal.pageSize.getWidth(), bh = doc.internal.pageSize.getHeight();
+  const x0 = 14, breite = bw - 28;
+  y = RAND.o - 6;
+  schrift(14, true);
+  doc.text(t(`EKG vom ${DF.lang.format(new Date(e.ts * 1000))}, ${uhr(e.ts * 1000)} Uhr`), x0, y + 5);
+  y += 10;
+  const iv = [[135, "QRS"], [136, "PR"], [137, "QT"], [138, "QTc"]].map(([typ, n]) => { const v = nahe(d, typ, e.ts); return v != null ? `${n} ${zahl(v)} ms` : null; }).filter(Boolean);
+  schrift(9.4, false, F.tinte2);
+  doc.text(t([`Auswertung des Geräts: ${afibText(e)}`, e.hf ? `Herzfrequenz ${zahl(e.hf)} bpm` : null, iv.length ? iv.join(", ") : null, e.q === "g" ? "Garmin" : "Withings"].filter(Boolean).join("   |   ")), x0, y + 3);
+  y += 8;
+  // Papier: 25 mm/s, 10 mm/mV, 10 s je Zeile
+  const freq = k.freq || 300;
+  const signal = k.signal;
+  const probe = signal.slice(0, Math.min(signal.length, freq * 5)).map((v) => Math.abs(v)).sort((a, b) => a - b);
+  const faktor = probe[Math.floor(probe.length * 0.98)] < 20 ? 1000 : 1; // Millivolt statt Mikrovolt?
+  const sek = 10, rand = 10, zeileMm = 30;
+  const proZeile = Math.round(sek * freq);
+  const zeilen = Math.min(Math.ceil(signal.length / proZeile), Math.floor((bh - y - RAND.u - 10) / zeileMm));
+  const papierB = Math.min(breite, rand + sek * 25), papierH = zeilen * zeileMm;
+  const px = x0, py = y;
+  doc.setLineWidth(0.08); doc.setDrawColor(...F.roseZart);
+  for (let mm = 0; mm <= papierB + 0.01; mm += 1) if (mm % 5) doc.line(px + mm, py, px + mm, py + papierH);
+  for (let mm = 0; mm <= papierH + 0.01; mm += 1) if (mm % 5) doc.line(px, py + mm, px + papierB, py + mm);
+  doc.setLineWidth(0.18); doc.setDrawColor(...F.roseMittel);
+  for (let mm = 0; mm <= papierB + 0.01; mm += 5) doc.line(px + mm, py, px + mm, py + papierH);
+  for (let mm = 0; mm <= papierH + 0.01; mm += 5) doc.line(px, py + mm, px + papierB, py + mm);
+  doc.setDrawColor(...F.tinte); doc.setLineJoin("round");
+  for (let z = 0; z < zeilen; z++) {
+    const teil = signal.slice(z * proZeile, (z + 1) * proZeile);
+    if (!teil.length) break;
+    const sortiert = [...teil].sort((a, b) => a - b);
+    const mitte = sortiert[Math.floor(sortiert.length / 2)] || 0;
+    const y0 = py + z * zeileMm + zeileMm * 0.58;
+    const yv = (v) => Math.max(py + z * zeileMm + 0.5, Math.min(py + (z + 1) * zeileMm - 0.5, y0 - ((v - mitte) * faktor / 1000) * 10));
+    // Eichzacke 1 mV, 0,2 s
+    doc.setLineWidth(0.3);
+    doc.lines([[1, 0], [0, -10], [5, 0], [0, 10], [1, 0]], px + 1.5, y0, [1, 1], "S", false);
+    doc.setLineWidth(0.26);
+    const pfad = [];
+    let lx = px + rand, ly = yv(teil[0]);
+    const start = [lx, ly];
+    for (let i = 1; i < teil.length; i++) {
+      const nx = px + rand + (i / freq) * 25, ny = yv(teil[i]);
+      pfad.push([nx - lx, ny - ly]);
+      lx = nx; ly = ny;
+    }
+    doc.lines(pfad, start[0], start[1], [1, 1], "S", false);
+    schrift(7.5, true, F.tinte2);
+    doc.text(`${z * sek} s`, px + 1.2, py + z * zeileMm + 3.4);
+  }
+  y = py + papierH + 5;
+  schrift(8.4, false, F.tinte3);
+  doc.text(t(`Papiervorschub 25 mm/s, Verstärkung 10 mm/mV, Ableitung I. Dargestellt: ${zahl(Math.min(signal.length, zeilen * proZeile) / freq)} von ${zahl(signal.length / freq)} Sekunden. Die Auswertung stammt vom Gerät und ist kein ärztlicher Befund.`), x0, y + 3);
+}
+
 // ---------------------------------------------------------------- Kopf- und Fußzeilen
 function kopfFuss() {
   const n = doc.getNumberOfPages();
@@ -818,7 +940,7 @@ async function ladeSchrift(pfad) {
   return s;
 }
 async function erstellen(ctx, optionen, fortschritt = () => {}) {
-  C = ctx; O = optionen;
+  C = mitRueckfall(ctx); O = optionen;
   if (!window.jspdf || !window.jspdf.jsPDF) throw new Error("Die PDF-Bibliothek ist nicht geladen.");
   if (!window.echarts) throw new Error("Die Diagramm-Bibliothek ist nicht geladen.");
   fortschritt("Daten werden zusammengestellt …");
@@ -845,11 +967,12 @@ async function erstellen(ctx, optionen, fortschritt = () => {}) {
   hinweise(d);
   if (A.blutdruck && A.protokoll && d.bp.length) protokoll(d);
   if (A.aktivitaet && A.aktivitaetenliste && d.akt.length) aktivitaetenListe(d);
+  if (A.ekg && A.ekgKurven && d.ekg.some((e) => e.kurve)) { fortschritt("EKG-Kurven …"); await ekgKurven(d); }
   kopfFuss();
   fortschritt("PDF wird gespeichert …");
   const blob = doc.output("blob");
   return { blob, seiten: doc.getNumberOfPages(), dateiname: `Gesundheitsbericht_${O.von}_bis_${O.bis}.pdf` };
 }
 
-window.GesundheitBericht = { erstellen };
+window.GesundheitBericht = { version: VERSION, erstellen, rueckfall: RUECKFALL };
 })();

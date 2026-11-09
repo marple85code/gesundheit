@@ -1,0 +1,57 @@
+# Gesundheits-App: veröffentlicht eine neue App-Version sofort, ohne auf den stündlichen
+# Datenabruf zu warten. Die Daten kommen unverändert aus dem Zweig "daten".
+name: App veröffentlichen
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/veroeffentlichen.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  seite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: seite
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.bereitstellen.outputs.page_url }}
+    steps:
+      - name: Neueste App holen
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Neueste Daten holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git clone --quiet --depth 1 --branch daten "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ablage 2>/dev/null; then
+            rm -rf ablage/.git
+          else
+            mkdir -p ablage
+          fi
+
+      - name: Seite bauen
+        run: |
+          rm -rf _site
+          cp -r web _site
+          if [ -d ablage/d ]; then cp -r ablage/d _site/d; fi
+
+      - name: Seite hochladen
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Seite veröffentlichen
+        id: bereitstellen
+        uses: actions/deploy-pages@v5

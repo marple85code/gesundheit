@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 APP = "GesundheitsApp"
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 STANDARD_ZEITZONE = "Europe/Berlin"
 UTC = timezone.utc
 
@@ -53,6 +53,15 @@ WITHINGS_TYPEN_ERWEITERT = (
     "1,4,5,6,8,9,10,11,12,54,71,73,76,77,88,91,123,130,135,136,137,138,139,140,155,"
     "158,159,167,168,169,170,173,174,175,196,197,198,226,227,229"
 )
+# Was die Geräte messen können (für die Bestandsliste im Protokoll und in der App)
+WITHINGS_NAMEN = {
+    1: "Gewicht", 5: "Fettfreie Masse", 6: "Körperfettanteil", 8: "Fettmasse", 9: "Blutdruck", 11: "Puls",
+    76: "Muskelmasse", 77: "Körperwasser", 88: "Knochenmasse", 91: "Pulswellengeschwindigkeit", 130: "EKG-Auswertung",
+    135: "QRS-Dauer", 136: "PR-Intervall", 137: "QT-Intervall", 138: "QTc-Intervall", 155: "Gefäßalter",
+    167: "Nervengesundheit", 168: "Extrazelluläres Wasser", 169: "Intrazelluläres Wasser", 170: "Viszeralfett",
+    173: "Fettfreie Masse je Körperbereich", 174: "Fettmasse je Körperbereich", 175: "Muskelmasse je Körperbereich",
+    226: "Grundumsatz", 227: "Stoffwechselalter", 229: "Hautleitfähigkeit",
+}
 AKTIVITAET_FELDER = (
     "steps,distance,elevation,soft,moderate,intense,active,calories,totalcalories,"
     "hr_average,hr_min,hr_max,hr_zone_0,hr_zone_1,hr_zone_2,hr_zone_3"
@@ -188,7 +197,9 @@ class BudgetErschoepft(Exception):
 
 
 class WithingsFehler(Exception):
-    pass
+    def __init__(self, text: str = "", status: int | None = None):
+        super().__init__(text)
+        self.status = status
 
 
 class GarminFehler(Exception):
@@ -727,7 +738,7 @@ class Withings:
                     raise Gebremst("Withings meldet zu viele Anfragen.")
                 time.sleep(65)
                 continue
-            raise WithingsFehler(f"Withings-Fehler {status}: {antwort.get('error', '')}")
+            raise WithingsFehler(f"Withings-Fehler {status}: {antwort.get('error', '')}", status=status if isinstance(status, int) else None)
 
     def alle_seiten(self, pfad: str, params: dict, schluessel: str) -> list:
         ergebnis: list = []
@@ -929,37 +940,77 @@ class WithingsSammler:
             neu = sorted(alle.values(), key=lambda z: (z[0], z[1], z[3]))
         bekannt = {(r[4], r[1], r[3]) for r in alt_zeilen}
         self.neu["messungen"] = sum(1 for r in neu if (r[4], r[1], r[3]) not in bekannt)
+        bestand: dict[str, int] = {}
+        for r in neu:
+            bestand[str(r[1])] = bestand.get(str(r[1]), 0) + 1
+        self._bestand_melden(alt.get("bestand") or {}, bestand)
         self.ablage.schreiben("d/withings.enc", {
             "messungen": neu, "modelle": modelle, "kommentare": kommentare,
+            "bestand": bestand, "abgelehnt": sorted(self._abgelehnte_typen(), key=int),
             "stand": int(time.time()),
         })
 
+    def _bestand_melden(self, vorher: dict, jetzt: dict) -> None:
+        """Welche Messarten Withings liefert – ins Protokoll, wenn sich daran etwas ändert."""
+        def namen(typen):
+            return ", ".join(WITHINGS_NAMEN[t_] for t_ in sorted(typen)) or "–"
+        da = {int(k) for k in jetzt if int(k) in WITHINGS_NAMEN}
+        war = {int(k) for k in vorher if str(k).isdigit() and int(k) in WITHINGS_NAMEN}
+        if not vorher:
+            fehlt = set(WITHINGS_NAMEN) - da
+            self.bericht.privat(f"Withings liefert: {namen(da)}. Nicht geliefert: {namen(fehlt)}")
+        elif da != war:
+            if da - war:
+                self.bericht.privat(f"Withings liefert jetzt auch: {namen(da - war)}")
+            if war - da:
+                self.bericht.privat(f"Withings liefert nicht mehr: {namen(war - da)}", "warnung")
+
+    def _abgelehnte_typen(self) -> dict[str, int]:
+        """Von Withings abgelehnte Messtypen mit Zeitpunkt (ältere Fassung: nur eine Liste)."""
+        roh = self.z.get("typen_abgelehnt") or {}
+        if isinstance(roh, list):
+            jetzt = int(time.time())
+            return {str(t_): jetzt for t_ in roh}
+        return {str(k): int(v) for k, v in roh.items() if str(k).isdigit()}
+
     def _erweiterte_messungen(self) -> list:
         """Neuere Messtypen (Viszeralfett, Grundumsatz, Segmente, Nerven ...) liefert Withings nur auf ausdrückliche
-        Anfrage. Lehnt Withings die gesammelte Anfrage ab, werden die Typen einzeln geholt; abgelehnte Typen
-        bleiben danach außen vor, damit die gesammelte Anfrage wieder klappt."""
-        aus = {str(t) for t in (self.z.get("typen_abgelehnt") or [])}
-        typen = [t for t in WITHINGS_TYPEN_ERWEITERT.split(",") if t not in aus]
+        Anfrage. Lehnt Withings die gesammelte Anfrage ab, werden die Typen einzeln geholt. Nur was Withings
+        ausdrücklich ablehnt (Statuscode, kein Netzfehler), bleibt eine Woche außen vor und wird dann erneut versucht."""
+        abgelehnt = self._abgelehnte_typen()
+        jetzt = int(time.time())
+        alle = WITHINGS_TYPEN_ERWEITERT.split(",")
+        wieder = [t_ for t_ in alle if t_ in abgelehnt and jetzt - abgelehnt[t_] > 7 * 86400]
+        typen = [t_ for t_ in alle if t_ not in abgelehnt]
+        gruppen: list = []
+        einzeln: list[str] = list(wieder)
         try:
-            return self.w.alle_seiten("measure", {"action": "getmeas", "category": 1, "meastypes": ",".join(typen)}, "measuregrps")
+            gruppen = self.w.alle_seiten("measure", {"action": "getmeas", "category": 1, "meastypes": ",".join(typen)}, "measuregrps")
         except (AnmeldungNoetig, Gebremst):
             raise
         except Exception as e:
-            self.bericht.privat(f"Withings lehnt die erweiterten Messtypen gesammelt ab ({e}) – hole sie einzeln", "warnung")
-        gruppen: list = []
-        abgelehnt: list[str] = []
-        for typ in typen:
+            self.bericht.privat(f"Withings lehnt die erweiterten Messtypen gesammelt ab ({kurz(e, 120)}) – hole sie einzeln", "warnung")
+            einzeln = typen + wieder
+        neu_abgelehnt: list[str] = []
+        for typ in einzeln:
             try:
                 gruppen += self.w.alle_seiten("measure", {"action": "getmeas", "category": 1, "meastype": typ}, "measuregrps")
+                abgelehnt.pop(typ, None)
             except (AnmeldungNoetig, Gebremst):
                 raise
+            except WithingsFehler as e:
+                if e.status is not None:  # Withings sagt ausdrücklich nein
+                    abgelehnt[typ] = jetzt
+                    neu_abgelehnt.append(typ)
             except Exception:
-                abgelehnt.append(typ)
-        if abgelehnt and len(abgelehnt) < len(typen):
-            self.z["typen_abgelehnt"] = sorted(aus | set(abgelehnt), key=int)
-            self.bericht.privat(f"Withings kennt diese Messtypen nicht: {', '.join(abgelehnt)} – sie werden künftig nicht mehr abgefragt")
-        elif abgelehnt:
+                pass  # Netz oder Ähnliches: beim nächsten Lauf wieder
+        if neu_abgelehnt and len(neu_abgelehnt) == len(einzeln) == len(alle):
             self.bericht.fehler("Withings erweiterte Messtypen", WithingsFehler("Withings hat alle erweiterten Messtypen abgelehnt"))
+        else:
+            if neu_abgelehnt:
+                namen = ", ".join(f"{WITHINGS_NAMEN.get(int(t_), 'Typ')} ({t_})" for t_ in neu_abgelehnt)
+                self.bericht.privat(f"Withings kennt diese Messtypen nicht: {namen} – neuer Versuch in einer Woche")
+            self.z["typen_abgelehnt"] = dict(sorted(abgelehnt.items(), key=lambda kv: int(kv[0])))
         return gruppen
 
     def ekg(self) -> None:

@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2.2";
+const APP_VERSION = "1.2.3";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -272,6 +272,9 @@ const Daten = {
       w._typ = new Map();
       w._grp = new Map();
       for (const r of w.messungen) {
+        // Nur die Werte je Körperbereich brauchen eine Ortsangabe. Kommt ein Wert für den ganzen Körper
+        // mit Ortsangabe (etwa „ganzer Körper“ oder „Rumpf“ beim Viszeralfett), zählt er wie ohne.
+        if (r[3] !== -1 && !W_JE_BEREICH.has(r[1])) r[3] = -1;
         const k = `${r[1]}|${r[3]}`;
         if (!w._typ.has(k)) w._typ.set(k, []);
         w._typ.get(k).push(r);
@@ -289,6 +292,7 @@ const Daten = {
 };
 
 // ---- Withings-Messwerte
+const W_JE_BEREICH = new Set([173, 174, 175]);
 function wReihe(w, typ, pos = -1) {
   return (w._typ.get(`${typ}|${pos}`) || []).map((r) => [r[0] * 1000, r[2], r[4]]).sort((a, b) => a[0] - b[0]);
 }
@@ -316,7 +320,7 @@ function blutdruckMessungen(w) {
 function istMorgens(ms) { const st = new Date(ms).getHours(); return st >= 4 && st < 14; }
 
 const W_TYPEN = {
-  1: ["Gewicht", "kg", 1], 4: ["Größe", "m", 2], 5: ["Fettfreie Masse", "kg", 1], 6: ["Körperfettanteil", "%", 1],
+  1: ["Gewicht", "kg", 1], 4: ["Größe", "m", 2], 5: ["Magermasse", "kg", 1], 6: ["Körperfettanteil", "%", 1],
   8: ["Fettmasse", "kg", 1], 9: ["Blutdruck diastolisch", "mmHg", 0], 10: ["Blutdruck systolisch", "mmHg", 0], 11: ["Puls", "bpm", 0],
   12: ["Temperatur", "°C", 1], 54: ["SpO₂", "%", 0], 71: ["Körpertemperatur", "°C", 1], 73: ["Hauttemperatur", "°C", 1],
   76: ["Muskelmasse", "kg", 1], 77: ["Körperwasser", "kg", 1], 88: ["Knochenmasse", "kg", 2], 91: ["Pulswellengeschwindigkeit", "m/s", 1],
@@ -763,6 +767,31 @@ function werteListe(eintraege) {
       e.befund ? h("span", { class: "befund-kurz" }, e.befund.kurz) : null,
       e.neben ? h("span", { class: "neben" }, e.neben) : null)));
 }
+/** Körperwerte wie in der Withings-App: links Name und Einordnung, rechts Wert mit einem Balken aus drei Bereichen */
+function markerListe(eintraege) {
+  const zeilen = eintraege.filter(Boolean).map((e) => {
+    const wert = h("div", { class: "marker-wert" }, e.wert, e.einheit ? h("small", null, e.einheit) : null);
+    // Zahl und Einheit nicht trennen („30 Tagen“, „1,7 kg“)
+    const neben = e.neben ? h("span", { class: "marker-neben" }, e.neben.replace(/(\d) (?=Tagen|kg|%|Jahre|Punkte|cm)/g, "$1\u00a0")) : null;
+    if (!e.zone) return h("li", { class: "marker" }, h("div", { class: "marker-text" }, h("span", { class: "marker-name" }, e.name), neben), h("div", { class: "marker-rechts" }, wert));
+    const i = zoneIndex(e.zone, e.zahl);
+    const stufe = e.zone.stufen[i][0];
+    const texte = zoneTexte(e.zone, e.stellen);
+    // Bezugsbereich wie „Referenzwerte“ bei Withings: der gute Bereich (beim Grundumsatz der Durchschnitt)
+    const gutJ = e.zone.stufen.findIndex(([, art]) => art === "gut");
+    const j = gutJ >= 0 ? gutJ : 1;
+    const bezug = `${e.zone.stufen[j][0]} ${texte[j]}${e.einheit ? ` ${e.einheit}` : ""}`;
+    const bereiche = e.zone.stufen.map(([n], k) => `${n}${texte[k] ? ` ${texte[k]}` : ""}`).join(", ");
+    return h("li", { class: "marker" },
+      h("div", { class: "marker-text" }, h("span", { class: "marker-name" }, e.name), h("b", { class: "marker-stufe" }, stufe),
+        h("span", { class: "marker-bezug" }, bezug), neben),
+      h("div", { class: "marker-rechts" }, wert,
+        h("div", { class: "marker-skala", role: "img", "aria-label": `${e.name} ${e.wert}${e.einheit ? ` ${e.einheit}` : ""}: ${stufe}. Bereiche: ${bereiche}.` },
+          e.zone.stufen.map(([, art], k) => h("span", { class: k === i ? `an ${art}` : null })),
+          h("i", { class: "zeiger", style: { left: `${zonePosition(e.zone, e.zahl) * 100}%` } }))));
+  });
+  return zeilen.length ? h("ul", { class: "marker-liste" }, zeilen) : null;
+}
 function leer(titel, text) { return h("div", { class: "leer" }, h("b", null, titel), text ? h("p", null, text) : null); }
 function hinweis(text, art = "", symbol = "info") {
   return h("div", { class: `hinweis ${art}` }, icon(symbol), h("div", null, [].concat(text).map((t) => (t instanceof Node ? t : h("p", null, t)))));
@@ -928,6 +957,61 @@ function wBereich(art, p) {
   if (!t || (p.alter == null && t.length > 1)) return null;
   return (t.find(([bis]) => (p.alter ?? 0) <= bis) || t[t.length - 1]).slice(1);
 }
+// Bereiche wie in der Withings-App (Body Scan). Für Magermasse, Muskeln, Wasser und Knochen nennt die App eine
+// Untergrenze, die mit der Körpergröße wächst: so viele kg je m² Größe zum Quadrat (abgeglichen mit den Werten,
+// die die Withings-App für eine Frau mit 164 cm anzeigt: Magermasse ab 41,7 kg, Wasser ab 27,7 kg, Knochen ab
+// 2,1 kg). Die Grenze zu „Hoch“ bzw. „Gut“ (das 1,25-Fache) ist geschätzt; Withings färbt beides grün.
+const W_APP_UNTERGRENZE = { w: { mager: 15.5, wasser: 10.3, knochen: 0.78 }, m: { mager: 18, wasser: 11.96, knochen: 0.91 } };
+/** Bereiche je Körperwert: grenzen [a, b], drei Stufen [Name, Art], dazu wohin die Grenzen gehören */
+function koerperZonen(p) {
+  const wer = p.geschlecht === "w" ? "Frauen" : p.geschlecht === "m" ? "Männer" : null;
+  const z = {
+    bmi: { grenzen: [18.5, 25], stufen: [["Niedrig", "warn"], ["Gut", "gut"], ["Hoch", "warn"]], mitteText: "18,5–24,9", quelle: "Einteilung der WHO" },
+    viszeral: { grenzen: [5, 10], aZuErster: true, bZuMitte: true, stufen: [["Gut", "gut"], ["Hoch", "warn"], ["Sehr hoch", "warn"]], quelle: "Einteilung von Withings" },
+  };
+  const fett = wBereich("fett", p);
+  if (fett) z.fett = { grenzen: fett, bZuMitte: true, stufen: [["Niedrig", "warn"], ["Normal", "gut"], ["Hoch", "warn"]],
+    quelle: `Normalbereich von Withings für ${wer}${W_BEREICHE.fett[p.geschlecht].length > 1 ? " deines Alters" : ""}` };
+  const ug = W_APP_UNTERGRENZE[p.geschlecht];
+  if (ug && p.groesse) {
+    const h2 = p.groesse * p.groesse;
+    const gross = `für ${wer} mit ${zahl(p.groesse * 100)} cm`;
+    const mehr = (u, oben) => ({ grenzen: [u, u * 1.25], obenGeschaetzt: true, stufen: [["Niedrig", "warn"], ["Normal", "gut"], [oben, "gut"]], quelle: `Untergrenze wie in der Withings-App ${gross}` });
+    z.mager = mehr(ug.mager * h2, "Hoch");
+    z.muskel = mehr((ug.mager - ug.knochen) * h2, "Hoch");
+    z.wasser = mehr(ug.wasser * h2, "Gut");
+    z.knochen = mehr(ug.knochen * h2, "Gut");
+  }
+  return z;
+}
+/** Grundumsatz: verglichen mit dem aus der Magermasse berechneten (Katch-McArdle), ±20 % gelten als Durchschnitt */
+function grundumsatzZone(mager) {
+  if (!zahlOk(mager)) return null;
+  const soll = 370 + 21.6 * mager;
+  return { grenzen: [Math.round(soll * 0.8), Math.round(soll * 1.2)], bZuMitte: true, stufen: [["Niedrig", "neutral"], ["Durchschnitt", "neutral"], ["Hoch", "neutral"]],
+    quelle: "verglichen mit dem Grundumsatz, den deine Magermasse erwarten lässt" };
+}
+function zoneIndex(z, v) {
+  const [a, b] = z.grenzen;
+  if (z.aZuErster ? v <= a : v < a) return 0;
+  return (z.bZuMitte ? v <= b : v < b) ? 1 : 2;
+}
+/** Beschriftung der drei Bereiche, zum Beispiel „unter 18,5“, „18,5–24,9“, „ab 25“ */
+function zoneTexte(z, stellen) {
+  const f = (x) => zahl(x, Number.isInteger(x) && stellen > 0 ? 0 : stellen);
+  const [a, b] = z.grenzen;
+  return [z.aZuErster ? `bis ${f(a)}` : `unter ${f(a)}`, z.mitteText || (z.obenGeschaetzt ? `ab ${f(a)}` : `${f(a)}–${f(b)}`),
+    z.obenGeschaetzt ? "" : z.bZuMitte ? `über ${f(b)}` : `ab ${f(b)}`];
+}
+/** Lage des Werts auf dem Balken (0 bis 1): jeder Bereich ein Drittel, offene Ränder so breit wie die Mitte */
+function zonePosition(z, v) {
+  const [a, b] = z.grenzen;
+  const i = zoneIndex(z, v);
+  const breite = b - a;
+  const [lo, hi] = [[a - breite, a], [a, b], [b, b + breite]][i];
+  return (i + Math.min(0.94, Math.max(0.06, (v - lo) / (hi - lo)))) / 3;
+}
+
 // Pulswellengeschwindigkeit: 90. Perzentil der Normalwerte nach Alter (m/s)
 const PWV_GRENZE = [[29, 7.1], [39, 8.0], [49, 8.6], [59, 10.0], [69, 13.1], [999, 14.6]];
 function spanne(a, b, einheit = "") {
@@ -1117,7 +1201,6 @@ async function befundeBerechnen() {
   if (letzteZus && Date.now() - letzteZus[0] < 90 * tage) {
     const g = wGruppe(w, letzteZus[2]);
     const bezug = `Messung vom ${datum(isoAusMs(letzteZus[0]), "kurz")}`;
-    const anteil = (typ) => (g[typ] != null && g[1] ? (g[typ] / g[1]) * 100 : null);
     const ohneProfil = [];
     const pruefen = ({ id, art, name, wert, tippsHoch, tippsNiedrig, nurNiedrig = false, nurHoch = false, extra = "" }) => {
       if (wert == null) return;
@@ -1134,13 +1217,25 @@ async function befundeBerechnen() {
       else gut(id, "koerper", name, w_, ziel, "#koerper");
     };
     pruefen({ id: "fett", art: "fett", name: "Körperfettanteil", wert: g[6], tippsHoch: TIPPS.abnehmen, tippsNiedrig: TIPPS.zunehmen });
-    pruefen({ id: "muskel", art: "muskel", name: "Muskelanteil", wert: anteil(76), tippsHoch: [], tippsNiedrig: TIPPS.muskel, nurNiedrig: true });
-    pruefen({ id: "wasser", art: "wasser", name: "Wasseranteil", wert: anteil(77), tippsHoch: [], tippsNiedrig: TIPPS.wasser, nurNiedrig: true });
-    pruefen({ id: "knochen", art: "knochen", name: "Knochenanteil", wert: anteil(88), tippsHoch: [], tippsNiedrig: TIPPS.knochen, nurNiedrig: true,
-      extra: " Die Waage schätzt diesen Wert nur." });
-    if (ohneProfil.length) {
-      const fehlend = [p.geschlecht ? null : "Geschlecht", p.alter == null ? "Alter" : null].filter(Boolean).join(" und ");
-      fehlt.push(`${ohneProfil.join(", ")}: Für die Normalbereiche ${fehlend.includes(" und ") ? "fehlen" : "fehlt"} ${fehlend} im Garmin-Profil.`);
+    // Muskeln, Wasser und Knochen wie in der Withings-App: in kg, Untergrenze nach Körpergröße
+    const zonen = koerperZonen(p);
+    const ohneGroesse = [];
+    const untergrenze = ({ id, name, typ, zone, tipps, extra = "" }) => {
+      const v = g[typ];
+      if (v == null) return;
+      if (!zone) { ohneGroesse.push(name); return; }
+      const a = zone.grenzen[0];
+      const w_ = `${zahl(v, 1)} kg`, ziel = `ab ${zahl(a, 1)} kg`;
+      if (v < a) neu({ id, bereich: "koerper", name, link: "#koerper", titel: `${name} unter dem Normalbereich`, wert: w_, bezug, kurz: `Normal ${ziel}`, ziel,
+        text: `Die Withings-App nennt für ${p.geschlecht === "w" ? "Frauen" : "Männer"} mit ${zahl(p.groesse * 100)} cm einen Normalbereich ${ziel}.${extra}`, tipps });
+      else gut(id, "koerper", name, w_, ziel, "#koerper");
+    };
+    untergrenze({ id: "muskel", name: "Muskelmasse", typ: 76, zone: zonen.muskel, tipps: TIPPS.muskel });
+    untergrenze({ id: "wasser", name: "Körperwasser", typ: 77, zone: zonen.wasser, tipps: TIPPS.wasser });
+    untergrenze({ id: "knochen", name: "Knochenmasse", typ: 88, zone: zonen.knochen, tipps: TIPPS.knochen, extra: " Die Waage schätzt diesen Wert nur." });
+    if (ohneProfil.length || ohneGroesse.length) {
+      const fehlend = [p.geschlecht ? null : "Geschlecht", ohneProfil.length && p.alter == null ? "Alter" : null, ohneGroesse.length && !p.groesse ? "Größe" : null].filter(Boolean);
+      fehlt.push(`${[...ohneProfil, ...ohneGroesse].join(", ")}: Für die Normalbereiche ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`);
     }
     if (g[170] != null) {
       const v = g[170];
@@ -1583,25 +1678,34 @@ async function ansichtKoerper() {
           anteil > 0.11 ? `${zahl(anteil * 100)} %` : "");
       }));
     const vor30 = (typ) => vorTagen(wReihe(w, typ), 30, letzteVoll[0]);
-    // Befunde gelten für die neueste Messung; sie hängen an den passenden Zeilen
-    const eintrag = (typ, name, stellen, einheit, befund = null) => (g[typ] != null ? { name, wert: zahl(g[typ], stellen), einheit, befund,
-      neben: deltaText(g[typ], vor30(typ), stellen, einheit, "in 30 Tagen") } : null);
+    const p = personAus(await Daten.info("garmin"), w);
+    const zonen = koerperZonen(p);
+    // Wie in der Withings-App: jeder Wert mit Einordnung und Bereichen; was Withings nicht liefert, fehlt einfach
+    const marker = (typ, name, stellen, einheit, zone, befund = null, neben = null) => (g[typ] != null ? { name, zahl: g[typ], wert: zahl(g[typ], stellen), einheit, stellen,
+      zone: zone || null, befund, neben: neben ?? deltaText(g[typ], vor30(typ), stellen, einheit, "in 30 Tagen") } : null);
+    const bmi = gewichtG && p.groesse ? gewichtG / (p.groesse * p.groesse) : null;
+    const fettNeben = g[8] != null ? [`${zahl(g[8], 1)} kg Fettmasse`, deltaText(g[8], vor30(8), 1, "kg", "in 30 Tagen")].filter(Boolean).join(", ") : null;
     knoten.push(abschnitt("Zusammensetzung", `Messung vom ${datum(isoAusMs(letzteVoll[0]), "langJahr")}, ${uhr(letzteVoll[0])} Uhr`,
       h("div", { class: "legende" }, teile.filter((t_) => t_[1] > 0).map(([name, , slot]) => h("span", null, h("i", { class: "kasten", style: { background: farbe(slot) } }), name))),
       balken,
-      werteListe([
-        eintrag(6, "Körperfettanteil", 1, "%", bf.fett), eintrag(8, "Fettmasse", 1, "kg"), eintrag(5, "Fettfreie Masse", 1, "kg"),
-        eintrag(76, "Muskelmasse", 1, "kg", bf.muskel), eintrag(88, "Knochenmasse", 2, "kg", bf.knochen), eintrag(77, "Körperwasser", 1, "kg"),
-        g[77] != null && gewichtG ? { name: "Wasseranteil", wert: zahl((g[77] / gewichtG) * 100, 1), einheit: "%", befund: bf.wasser } : null,
-        eintrag(168, "Extrazelluläres Wasser", 1, "kg"), eintrag(169, "Intrazelluläres Wasser", 1, "kg"),
-        eintrag(170, "Viszeralfett", 1, "", bf.viszeral), eintrag(226, "Grundumsatz", 0, "kcal"), eintrag(227, "Stoffwechselalter", 0, "Jahre", bf.stoffwechsel),
+      markerListe([
+        marker(6, "Körperfettanteil", 1, "%", zonen.fett, bf.fett, fettNeben),
+        marker(76, "Muskelmasse", 1, "kg", zonen.muskel, bf.muskel),
+        bmi ? { name: "Body-Mass-Index", zahl: bmi, wert: zahl(bmi, 1), einheit: "", stellen: 1, zone: zonen.bmi, befund: bf.bmi, neben: `${zahl(gewichtG, 1)} kg bei ${zahl(p.groesse * 100)} cm` } : null,
+        marker(226, "Grundumsatz", 0, "kcal", grundumsatzZone(g[5])),
+        marker(170, "Viszeralfett", 1, "", zonen.viszeral, bf.viszeral),
+        marker(5, "Magermasse", 1, "kg", zonen.mager),
+        marker(88, "Knochenmasse", 1, "kg", zonen.knochen, bf.knochen),
+        marker(77, "Körperwasser", 1, "kg", zonen.wasser, bf.wasser, g[77] != null && gewichtG ? [`${zahl((g[77] / gewichtG) * 100)} % des Gewichts`, deltaText(g[77], vor30(77), 1, "kg", "in 30 Tagen")].filter(Boolean).join(", ") : null),
+        marker(168, "Extrazelluläres Wasser", 1, "kg"), marker(169, "Intrazelluläres Wasser", 1, "kg"),
+        marker(227, "Stoffwechselalter", 0, "Jahre", null, bf.stoffwechsel, p.alter != null ? `Lebensalter ${p.alter} Jahre` : null),
       ]),
+      h("p", { class: "fussnote" }, koerperFussnote(zonen, p, g)),
       befundBox([bf.fett, bf.viszeral, bf.muskel, bf.wasser, bf.knochen, bf.stoffwechsel])));
   }
 
   // ---- Körperregionen
   if (letzter(wReihe(w, 175, 12)) || letzter(wReihe(w, 174, 12))) knoten.push(await segmentAbschnitt(w));
-  else knoten.push(abschnitt("Körperregionen", null, leer("Noch keine Messung der Körperregionen", "Die Body Scan misst Arme, Beine und Rumpf getrennt, wenn du beim Wiegen den Griff herausziehst und mit beiden Händen hältst.")));
 
   // ---- Verlauf aller Körperwerte
   const typen = [6, 76, 8, 5, 77, 88, 170, 226, 227, 168, 169].filter((t_) => wReihe(w, t_).length > 1);
@@ -1630,15 +1734,62 @@ async function ansichtKoerper() {
   return { titel: "Körper", knoten };
 }
 function zahlOk(v) { return typeof v === "number" && Number.isFinite(v); }
+/** Woher die Bereiche stammen – nur für Werte, die auch angezeigt werden */
+function koerperFussnote(zonen, p, g) {
+  const teile = ["Bereiche wie in der Withings-App: BMI nach der Einteilung der WHO"];
+  if (zonen.fett && g[6] != null) teile.push(`Fettanteil nach dem Normalbereich von Withings für ${p.geschlecht === "w" ? "Frauen" : "Männer"}${p.alter != null ? ` mit ${p.alter} Jahren` : ""}`);
+  if (g[170] != null) teile.push("Viszeralfett nach Withings (bis 5 gut, bis 10 hoch)");
+  if (zonen.muskel) teile.push(`Muskeln, Magermasse, Wasser und Knochen gemessen an deiner Größe (${zahl(p.groesse * 100)} cm)`);
+  if (g[226] != null) teile.push("Grundumsatz verglichen mit dem, was deine Magermasse erwarten lässt (±20 %)");
+  let text = `${teile.join(", ")}.`;
+  if (!zonen.fett || !zonen.muskel) {
+    const fehlend = [p.geschlecht ? null : "Geschlecht", p.alter == null && !zonen.fett ? "Alter" : null, p.groesse ? null : "Größe"].filter(Boolean);
+    if (fehlend.length) text += ` Für weitere Bereiche ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`;
+  }
+  return text;
+}
 
 // ---- Körperregionen wie in der Withings-App: Muskel- und Fettmasse für Arme, Beine und Rumpf
 const REGIONEN = [["rumpf", 12, "Rumpf"], ["armR", 2, "Arm rechts"], ["armL", 3, "Arm links"], ["beinR", 11, "Bein rechts"], ["beinL", 10, "Bein links"]];
-const REGION_STUFEN = {
-  muskel: { hell: ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"], dunkel: ["#184f95", "#2a78d6", "#5598e7", "#86b6ef", "#b7d3f6"], skala: [50, 80] },
-  fett: { hell: ["#fe9169", "#eb6834", "#c94908", "#9e3703", "#752600"], dunkel: ["#8a2e00", "#c94908", "#eb6834", "#fe9169", "#fec0a9"], skala: [10, 45] },
+// Einordnung je Bereich: Grün optimal, Blau gut, Rot schlecht (auch bei Rot-Grün-Sehschwäche unterscheidbar geprüft)
+const REGION_FARBEN = {
+  hell: { optimal: "#3aa655", gut: "#2569c4", schlecht: "#c62f2f", ohne: "#a7b1b4" },
+  dunkel: { optimal: "#3aa655", gut: "#3987e5", schlecht: "#b83a3a", ohne: "#56656b" },
 };
+const REGION_STUFEN = ["optimal", "gut", "schlecht"];
+/** Maßstab für die Farben: Bereiche für den ganzen Körper (für einzelne Bereiche nennt Withings keine eigenen Werte).
+    Fett: Normalbereich des Fettanteils von Withings. Muskeln: Normalbereich der Muskelmasse wie in der Withings-App,
+    umgerechnet auf das Gewicht dieser Messung – so passt die Farbe zur Einordnung „Normal“ in der Withings-App. */
+function regionMassstab(modus, p, gewicht) {
+  if (modus === "fett") {
+    const ber = wBereich("fett", p);
+    if (!ber) return null;
+    const [a, b] = ber;
+    return { art: "fett", a, b, mitte: Math.round(((a + b) / 2) * 2) / 2 };
+  }
+  const z = koerperZonen(p).muskel;
+  if (!z || !zahlOk(gewicht) || gewicht <= 0) return null;
+  const [kgA, kgB] = z.grenzen;
+  const anteil = (kg) => Math.round((kg / gewicht) * 1000) / 10;
+  return { art: "muskel", a: anteil(kgA), b: anteil(kgB), mitte: anteil((kgA + kgB) / 2), kgA, gewicht };
+}
+/** Fett: bis zur Mitte des Normalbereichs optimal, bis zur Obergrenze gut, darüber schlecht; unter dem Normalbereich gut.
+    Muskeln: ab der Mitte des Normalbereichs optimal, ab der Untergrenze gut, darunter schlecht. */
+function regionEinordnung(modus, anteil, m) {
+  if (anteil == null || !m) return null;
+  if (modus === "fett") return anteil > m.b ? "schlecht" : anteil > m.mitte || anteil < m.a ? "gut" : "optimal";
+  return anteil < m.a ? "schlecht" : anteil < m.mitte ? "gut" : "optimal";
+}
+function regionFarbe(stufe) { return REGION_FARBEN[istDunkel() ? "dunkel" : "hell"][stufe || "ohne"]; }
+function leuchtdichte(hex) {
+  const k = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * k[0] + 0.7152 * k[1] + 0.0722 * k[2];
+}
+/** Schrift auf einer Fläche: weiß, wenn das gut lesbar ist (Kontrast ab 4,5), sonst dunkel */
+function schriftAuf(hex) { return 1.05 / (leuchtdichte(hex) + 0.05) >= 4.5 ? "#ffffff" : "#12262e"; }
 async function segmentAbschnitt(w) {
   let modus = speicher.get("gesundheit.region") === "fett" ? "fett" : "muskel";
+  const p = personAus(await Daten.info("garmin"), w);
   const letzte = letzter(wReihe(w, 175, 12)) || letzter(wReihe(w, 174, 12));
   const g = wGruppe(w, letzte[2]);
   const v = (typ, pos) => (zahlOk(g[`${typ}.${pos}`]) ? g[`${typ}.${pos}`] : null);
@@ -1655,15 +1806,20 @@ async function segmentAbschnitt(w) {
       onclick: () => { if (m !== modus) { modus = m; speicher.set("gesundheit.region", m); zeichne(); if (verlaufKarte) verlaufKarte.neuLaden(); } } }, name)));
     const typ = modus === "fett" ? 174 : 175;
     const anteil = modus === "fett" ? fettAnteil : muskelAnteil;
+    const massstab = regionMassstab(modus, p, g[1]);
     const werte = {};
-    for (const [k, pos, name] of REGIONEN) werte[k] = { wert: v(typ, pos), anteil: anteil(pos), name };
-    const zeile = (name, pos) => {
-      const fa = fettAnteil(pos);
+    for (const [k, pos, name] of REGIONEN) {
+      const a_ = anteil(pos);
+      werte[k] = { wert: v(typ, pos), anteil: a_, name, stufe: v(typ, pos) != null ? regionEinordnung(modus, a_, massstab) : null };
+    }
+    const zeile = (k, name, pos) => {
       const d = v(typ, pos) != null && vor30(typ, pos) != null ? v(typ, pos) - vor30(typ, pos) : null;
-      return h("tr", null, h("td", { class: "text" }, name),
+      const st = werte[k].stufe;
+      return h("tr", null, h("td", { class: "text" }, name,
+          st ? h("span", { class: "region-stufe" }, h("i", { style: { background: regionFarbe(st) } }), st) : null),
         h("td", null, v(175, pos) != null ? `${zahl(v(175, pos), 2)} kg` : "–"),
         h("td", null, v(174, pos) != null ? `${zahl(v(174, pos), 2)} kg` : "–"),
-        h("td", null, fa != null ? `${zahl(fa)} %` : "–"),
+        h("td", null, werte[k].anteil != null ? `${zahl(werte[k].anteil, 1)} %` : "–"),
         h("td", null, d != null ? `${vorzeichen(d, 2)} kg` : "–"));
     };
     const seiten = (links, rechts, name) => {
@@ -1673,17 +1829,14 @@ async function segmentAbschnitt(w) {
       const ausgeglichen = Math.abs(diff) < 3;
       return { name, wert: ausgeglichen ? "ausgeglichen" : `links ${diff > 0 ? "mehr" : "weniger"}`, neben: `${vorzeichen(diff, 1)} % (links ${zahl(l, 2)} kg, rechts ${zahl(r, 2)} kg)` };
     };
-    const [a, b] = REGION_STUFEN.fett.skala;
     figurBox.replaceChildren(
       koerperFigur(werte, modus),
       h("div", null,
-        modus === "fett" ? h("div", { class: "region-legende" },
-          h("span", null, "Farbe: Fettanteil des Bereichs"),
-          h("span", { class: "stufen" }, REGION_STUFEN.fett[istDunkel() ? "dunkel" : "hell"].map((c) => h("i", { style: { background: c } }))),
-          h("span", null, `${a} % bis ${b} % und mehr`)) : null,
+        regionLegende(modus, massstab, p),
         h("div", { class: "tabellen-rahmen region-tabelle" }, h("table", { class: "tabelle" },
-          h("thead", null, h("tr", null, h("th", null, "Bereich"), h("th", null, "Muskeln"), h("th", null, "Fett"), h("th", null, "Fettanteil"), h("th", { title: `Veränderung der ${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in 30 Tagen` }, "± 30 Tage"))),
-          h("tbody", null, REGIONEN.map(([, pos, name]) => zeile(name, pos))))),
+          h("thead", null, h("tr", null, h("th", null, "Bereich"), h("th", null, "Muskeln"), h("th", null, "Fett"), h("th", null, modus === "fett" ? "Fettanteil" : "Muskelanteil"),
+            h("th", { title: `Veränderung der ${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in 30 Tagen` }, "± 30 Tage"))),
+          h("tbody", null, REGIONEN.map(([k, pos, name]) => zeile(k, name, pos))))),
         werteListe([seiten(3, 2, `Arme, ${modus === "fett" ? "Fett" : "Muskeln"}`), seiten(10, 11, `Beine, ${modus === "fett" ? "Fett" : "Muskeln"}`)])));
   };
   zeichne();
@@ -1700,25 +1853,41 @@ async function segmentAbschnitt(w) {
     } });
   return abschnitt("Körperregionen", `Muskel- und Fettmasse von Armen, Beinen und Rumpf, Messung vom ${datum(isoAusMs(letzte[0]), "langJahr")}.`,
     umschalter, figurBox,
-    h("p", { class: "fussnote" }, "Die Body Scan misst die Körperregionen, wenn du den Griff mit beiden Händen hältst. „± 30 Tage“ ist die Veränderung gegenüber der Messung vor rund einem Monat. Vergleichswerte anderer Menschen gleichen Alters, wie sie die Withings-App zeigt, gibt Withings über die Schnittstelle nicht heraus."),
+    h("p", { class: "fussnote" }, "Die Body Scan misst die Körperregionen, wenn du den Griff mit beiden Händen hältst. „± 30 Tage“ ist die Veränderung gegenüber der Messung vor rund einem Monat. Vergleichswerte für einzelne Körperbereiche, wie sie die Withings-App zeigt, gibt Withings über die Schnittstelle nicht heraus; die Farben richten sich deshalb nach dem Normalbereich für den ganzen Körper."),
     verlaufKarte);
+}
+
+/** Legende zur Figur: drei Stufen mit ihren Grenzen, oder warum es keine Farben gibt */
+function regionLegende(modus, m, p) {
+  if (!m) {
+    const fehlend = [p.geschlecht ? null : "Geschlecht", modus === "fett" && p.alter == null ? "Alter" : null, modus !== "fett" && !p.groesse ? "Größe" : null].filter(Boolean);
+    return h("p", { class: "region-legende leise" }, fehlend.length
+      ? `Für die Einordnung in optimal, gut und schlecht ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`
+      : "Für die Einordnung in optimal, gut und schlecht fehlt das Gewicht dieser Messung.");
+  }
+  const f = (x) => zahl(x, Number.isInteger(x) ? 0 : 1);
+  const grenzen = modus === "fett"
+    ? { optimal: `${f(m.a)}–${f(m.mitte)} %`, gut: `${f(m.mitte)}–${f(m.b)} %`, schlecht: `über ${f(m.b)} %` }
+    : { optimal: `ab ${f(m.mitte)} %`, gut: `${f(m.a)}–${f(m.mitte)} %`, schlecht: `unter ${f(m.a)} %` };
+  const wer = p.geschlecht === "w" ? "Frauen" : "Männer";
+  const erklaerung = modus === "fett"
+    ? `Fettanteil des Bereichs, gemessen am Normalbereich von Withings für ${wer}${W_BEREICHE.fett[p.geschlecht].length > 1 ? " deines Alters" : ""} (${spanne(m.a, m.b, "%")}). Unter ${f(m.a)} % zeigt die Figur Blau.`
+    : `Muskelanteil des Bereichs. Die Withings-App stuft Muskelmasse bei ${wer} mit ${zahl(p.groesse * 100)} cm ab ${zahl(m.kgA, 1)} kg als normal ein; bei deinem Gewicht von ${zahl(m.gewicht, 1)} kg sind das ${f(m.a)} %.`;
+  return h("div", { class: "region-legende" },
+    h("div", { class: "region-stufen" }, REGION_STUFEN.map((st) => h("span", null, h("i", { style: { background: regionFarbe(st) } }), h("b", null, st), ` ${grenzen[st]}`))),
+    h("p", null, erklaerung));
 }
 
 function istDunkel() {
   const t_ = document.documentElement.getAttribute("data-theme");
   return t_ ? t_ === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
 }
-/** Körperfigur von vorn mit fünf Bereichen; Farbe nach Anteil, Beschriftung mit kg (und Fettanteil) */
+/** Körperfigur von vorn mit fünf Bereichen; Farbe nach Einordnung (optimal, gut, schlecht), Beschriftung mit kg und Anteil */
 function koerperFigur(werte, modus) {
-  const st = REGION_STUFEN[modus];
-  const dunkel = istDunkel();
-  const stufen = st[dunkel ? "dunkel" : "hell"];
-  const [a, b] = st.skala;
-  // Muskeln einfarbig (mittlere Stufe), Fett nach Fettanteil des Bereichs
-  const stufe = (anteil) => (modus !== "fett" || anteil == null ? 2 : Math.max(0, Math.min(4, Math.floor(((anteil - a) / (b - a)) * 5))));
-  const schrift = (i) => ((i >= 2) !== dunkel ? "#ffffff" : dunkel ? "#0c1417" : "#12262e");
+  const was = modus === "fett" ? "Fett" : "Muskeln";
+  const beschreibung = (x) => (x.wert != null ? `${zahl(x.wert, 2)} kg${x.anteil != null ? `, ${zahl(x.anteil)} % ${was}` : ""}${x.stufe ? `, ${x.stufe}` : ""}` : "keine Messung");
   const svg = s("svg", { class: "koerperfigur", viewBox: "0 0 440 600", role: "img",
-    "aria-label": `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} je Körperbereich: ${Object.values(werte).map((x) => `${x.name} ${x.wert != null ? zahl(x.wert, 2) + " kg" : "keine Messung"}`).join(", ")}` });
+    "aria-label": `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} je Körperbereich: ${Object.values(werte).map((x) => `${x.name} ${beschreibung(x)}`).join("; ")}` });
   const FORMEN = {
     rumpf: "M184 104 C172 110 160 113 152 118 C150 132 151 146 153 160 C155 196 160 222 160 246 C160 268 149 284 147 301 C166 316 184 328 200 333 C216 328 234 316 253 301 C251 284 240 268 240 246 C240 222 245 196 247 160 C249 146 250 132 248 118 C240 113 228 110 216 104 C208 109 192 109 184 104 Z",
     armR: "M148 116 C132 118 122 128 120 144 L113 204 C111 218 109 230 108 240 L100 300 C99 308 97 314 96 320 C92 334 91 348 96 360 C100 368 108 368 112 360 C115 352 114 336 115 322 L124 266 C126 256 129 246 131 236 L140 184 C142 172 145 164 148 158 C146 144 146 130 148 116 Z",
@@ -1731,12 +1900,12 @@ function koerperFigur(werte, modus) {
   koerper.append(s("ellipse", { cx: 200, cy: 54, rx: 28, ry: 35, class: "kopf-form" }), s("path", { d: "M188 82 L212 82 L214 110 L186 110 Z", class: "kopf-form" }));
   for (const [k, d] of Object.entries(FORMEN)) {
     const x = werte[k];
-    const p_ = s("path", { d, class: "segment", fill: x && x.wert != null ? stufen[stufe(x.anteil)] : "var(--blatt-2)" });
-    p_.append(s("title", null, `${x.name}: ${x.wert != null ? `${zahl(x.wert, 2)} kg` : "keine Messung"}${x.anteil != null && modus === "fett" ? `, ${zahl(x.anteil)} % Fett` : ""}`));
+    const p_ = s("path", { d, class: "segment", fill: x && x.wert != null ? regionFarbe(x.stufe) : "var(--blatt-2)" });
+    p_.append(s("title", null, `${x.name}: ${beschreibung(x)}`));
     koerper.append(p_);
   }
   const text = (x) => (x.wert != null ? `${zahl(x.wert, x.wert >= 10 ? 1 : 2)} kg` : "–");
-  const unter = (x) => (modus === "fett" && x.anteil != null ? `${x.name}, ${zahl(x.anteil)} %` : x.name);
+  const unter = (x) => (x.wert != null && x.anteil != null ? `${x.name}, ${zahl(x.anteil)} %` : x.name);
   const etikett = (k, x0, y, anker) => {
     const x = werte[k];
     const gr = s("g", { class: "etikett" });
@@ -1745,10 +1914,10 @@ function koerperFigur(werte, modus) {
     return gr;
   };
   const r = werte.rumpf;
-  const innen = schrift(stufe(r.anteil));
+  const innen = schriftAuf(regionFarbe(r.stufe));
   const rumpf = s("g", { class: "etikett" });
   rumpf.append(s("text", { x: 220, y: 190, "text-anchor": "middle", class: "wert", style: `fill:${r.wert != null ? innen : "var(--tinte)"}` }, text(r)));
-  rumpf.append(s("text", { x: 220, y: 208, "text-anchor": "middle", class: "name", style: `fill:${r.wert != null ? innen : "var(--tinte-2)"}` }, modus === "fett" && r.anteil != null ? `Rumpf, ${zahl(r.anteil)} %` : "Rumpf"));
+  rumpf.append(s("text", { x: 220, y: 208, "text-anchor": "middle", class: "name", style: `fill:${r.wert != null ? innen : "var(--tinte-2)"}` }, r.wert != null && r.anteil != null ? `Rumpf, ${zahl(r.anteil)} %` : "Rumpf"));
   svg.append(rumpf,
     etikett("armR", 4, 208, "start"), etikett("armL", 436, 208, "end"),
     etikett("beinR", 4, 414, "start"), etikett("beinL", 436, 414, "end"),
@@ -1828,8 +1997,6 @@ async function ansichtHerz() {
         h("thead", null, h("tr", null, h("th", null, "Zeitpunkt"), h("th", null, "Wert"), h("th", null, "Puls"), h("th", null, "Einstufung"))),
         h("tbody", null, letzte.map((m) => { const [t_, a_] = bpKlasse(m.sys, m.dia); return h("tr", null,
           h("td", null, kurzZeit(m.ts)), h("td", null, `${m.sys}/${m.dia}`), h("td", null, m.puls ?? "–"), h("td", null, chip(t_, a_))); })))))));
-  } else {
-    knoten.push(abschnitt("Blutdruck", null, leer("Noch keine Blutdruckmessung", "Messungen der BPM Vision erscheinen hier, sobald sie an Withings übertragen wurden.")));
   }
 
   // ---- Ruhepuls
@@ -1890,10 +2057,10 @@ async function ansichtHerz() {
   }
 
   // ---- EKG
-  knoten.push(abschnitt("EKG", ekgListe.length ? "Aufzeichnungen von Withings und Garmin. Tippe auf eine Aufzeichnung, um die Kurve zu sehen." : null,
+  if (ekgListe.length) knoten.push(abschnitt("EKG", "Aufzeichnungen von Withings und Garmin. Tippe auf eine Aufzeichnung, um die Kurve zu sehen.",
     befundBox([bf.ekg, bf.qtc]),
-    ekgListe.length ? h("ul", { class: "liste" }, ekgListe.map((e_) => h("li", null, ekgZeile(e_, w))))
-      : leer("Noch kein EKG", "EKG-Aufzeichnungen der Body Scan erscheinen hier mit Kurve und Auswertung.")));
+    h("ul", { class: "liste" }, ekgListe.map((e_) => h("li", null, ekgZeile(e_, w))))));
+  if (!knoten.length) knoten.push(leer("Noch keine Herzwerte", "Blutdruck, Ruhepuls, Herzfrequenzvariabilität und EKG erscheinen hier, sobald Messungen da sind."));
   return { titel: "Herz", knoten };
 }
 /** Mehrere Werte am Tag zu einem Tagesmittel (x als Datum) */
@@ -2667,15 +2834,20 @@ async function berichtBibliotheken() {
   if (!window.jspdf.jsPDF.API.autoTable) await skriptLaden("vendor/jspdf.plugin.autotable.min.js");
   if (!window.GesundheitBericht) await skriptLaden(`bericht.js?v=${APP_VERSION}`);
 }
+/** Passt der geladene Berichtsteil zur App? Nach einem Update kann kurz eine andere Fassung im Speicher liegen. */
+function berichtPasst() {
+  return Boolean(window.GesundheitBericht && window.GesundheitBericht.version === APP_VERSION);
+}
 function berichtKontext() {
   return { Daten, kennzahl, kennzahlen, wReihe, wTaeglich, wGruppe, blutdruckMessungen, istMorgens, textDeutsch, sportName, dauer, zahl, vorzeichen, mittel,
     tagMs, isoAusMs, isoPlus, isoWoche, montagIso, nachWochen, tagesMittel, letzter, SCHRIFT, APP_VERSION,
-    personAus, wBereich, W_BEREICHE, PWV_GRENZE, spanne, ekgKlasse };
+    personAus, wBereich, W_BEREICHE, PWV_GRENZE, spanne, ekgKlasse, koerperZonen };
 }
 const BERICHT_TEILE = [
   ["blutdruck", "Blutdruck und Puls", "Mittelwerte morgens und abends, Verlauf, Wochenmittel"],
   ["protokoll", "Blutdruck-Messprotokoll", "Jede einzelne Messung, als Anhang", "blutdruck"],
-  ["ekg", "EKG", "Die letzten fünf Aufzeichnungen mit der Auswertung des Geräts"],
+  ["ekg", "EKG", "Aufzeichnungen mit der Auswertung des Geräts"],
+  ["ekgKurven", "EKG-Kurven", "Je Aufzeichnung eine Seite wie auf EKG-Papier", "ekg"],
   ["herz", "Herz und Kreislauf", "Ruhepuls, Herzfrequenzvariabilität, Gefäße"],
   ["koerper", "Körperzusammensetzung", "Gewicht, Fett, Muskeln, Wasser, Körperregionen"],
   ["schlaf", "Schlaf und Atmung", "Dauer, Phasen, Sauerstoffsättigung, Atemfrequenz"],
@@ -2694,7 +2866,7 @@ async function berichtVerfuegbar(von, bis) {
   const n = (x, eins, viele) => (x ? `${zahl(x)} ${x === 1 ? eins : viele}` : null);
   return {
     blutdruck: n(bp, "Messung", "Messungen"), protokoll: bp ? `etwa ${Math.max(1, Math.ceil(new Set(blutdruckMessungen(w).filter((m) => m.ts >= a && m.ts <= b).map((m) => isoAusMs(m.ts))).size / 34))} Seiten` : null,
-    ekg: n(e.length, "Aufzeichnung", "Aufzeichnungen"),
+    ekg: n(e.length, "Aufzeichnung", "Aufzeichnungen"), ekgKurven: n(e.filter((x) => x.kurve).length, "Kurve", "Kurven"),
     herz: n(Math.max(k.ruhepuls.length, k.hrv.length), "Tag", "Tage"), koerper: n(gewicht, "Messtag", "Messtage"),
     schlaf: n(k.schlaf_dauer.length, "Nacht", "Nächte"), aktivitaet: n(ak, "Aktivität", "Aktivitäten") || n(k.schritte.length, "Tag", "Tage"),
     aktivitaetenliste: n(ak, "Aktivität", "Aktivitäten"), erholung: n(k.stress.length, "Tag", "Tage"),
@@ -2712,20 +2884,21 @@ async function ansichtBericht() {
   const freiBox = h("div", { class: "datum-zeile" }, h("label", null, h("span", null, "Von"), vonFeld), h("label", null, h("span", null, "Bis"), bisFeld));
   const zrText = h("p", { class: "leise", style: { marginTop: "10px" } });
   const seg = h("div", { class: "segmente zr", role: "group", "aria-label": "Zeitraum des Berichts" });
-  const auswahl = { blutdruck: true, protokoll: true, ekg: true, herz: true, koerper: true, schlaf: true, aktivitaet: true, aktivitaetenliste: false, erholung: true, ...(g.abschnitte || {}) };
+  const auswahl = { blutdruck: true, protokoll: true, ekg: true, ekgKurven: true, herz: true, koerper: true, schlaf: true, aktivitaet: true, aktivitaetenliste: false, erholung: true, ...(g.abschnitte || {}) };
   const optionenBox = h("div", { class: "optionen" });
   const zeitraumJetzt = () => (zr === "frei" ? [vonFeld.value || isoMinus(90), bisFeld.value || heute].sort() : [isoMinus(+zr - 1), heute]);
-  let verfuegbar = {};
+  let verfuegbar = null;
   let nr = 0;
   const zeichneOptionen = () => {
-    optionenBox.replaceChildren(...BERICHT_TEILE.map(([id, name, text, eltern]) => {
+    // Was im Zeitraum keine Daten hat, kommt auch nicht in den Bericht – also gar nicht erst anbieten
+    const teile = BERICHT_TEILE.filter(([id, , , eltern]) => !verfuegbar || (verfuegbar[id] && (!eltern || verfuegbar[eltern])));
+    optionenBox.replaceChildren(...teile.map(([id, name, text, eltern]) => {
       const box = h("input", { type: "checkbox", id: `bt-${id}`, checked: auswahl[id] || null, disabled: (eltern && !auswahl[eltern]) || null,
         onchange: (e) => { auswahl[id] = e.target.checked; zeichneOptionen(); } });
-      const anzahl = verfuegbar[id];
       return h("label", { class: `option${eltern ? " unter" : ""}`, for: `bt-${id}` }, box,
         h("span", { class: "option-text" }, h("b", null, name), h("span", null, text)),
-        h("span", { class: `option-anzahl${anzahl ? "" : " leer-wert"}` }, anzahl || "keine Daten"));
-    }));
+        verfuegbar ? h("span", { class: "option-anzahl" }, verfuegbar[id]) : null);
+    }), verfuegbar && !teile.length ? leer("Keine Daten in diesem Zeitraum", "Wähle einen anderen Zeitraum.") : null);
   };
   const aktualisieren = async () => {
     const meins = ++nr;
@@ -2783,7 +2956,11 @@ async function ansichtBericht() {
       zeigeErgebnis(berichtDatei);
     } catch (e) {
       console.error(e);
-      status.textContent = `Der Bericht konnte nicht erstellt werden (${e && e.message ? e.message : e}).`;
+      if (window.GesundheitBericht && !berichtPasst()) {
+        // Eine neuere App-Version ist schon teilweise da: einmal neu laden, dann passt alles zusammen
+        status.replaceChildren(`Der Bericht konnte nicht erstellt werden, weil gerade eine neue Version der App geladen wird. Lade die App einmal neu und tippe dann noch einmal auf „PDF erstellen“.`,
+          h("span", { class: "knopf-zeile" }, h("button", { type: "button", class: "knopf zweit", onclick: () => location.reload() }, "Neu laden")));
+      } else status.textContent = `Der Bericht konnte nicht erstellt werden (${e && e.message ? e.message : e}).`;
     } finally { knopf.disabled = false; }
   });
   await aktualisieren();
@@ -2815,10 +2992,23 @@ function workflowAdresse() {
   const repo = location.pathname.split("/").filter(Boolean)[0];
   return m && repo ? `https://github.com/${m[1]}/${repo}/actions/workflows/gesundheit.yml` : null;
 }
+// Was Body Scan und BPM Vision messen können – zum Abgleich, was davon über die Schnittstelle ankommt
+const W_GERAETEWERTE = [[[1], "Gewicht"], [[6, 8], "Körperfett"], [[5], "Magermasse"], [[76], "Muskelmasse"], [[77], "Körperwasser"], [[88], "Knochenmasse"],
+  [[170], "Viszeralfett"], [[226], "Grundumsatz"], [[173, 174, 175], "Körperregionen"], [[168, 169], "Intra- und extrazelluläres Wasser"], [[227], "Stoffwechselalter"],
+  [[91], "Pulswellengeschwindigkeit"], [[155], "Gefäßalter"], [[167, 158, 159], "Nervengesundheit"], [[9, 10], "Blutdruck"]];
+async function withingsBestand() {
+  const [w, ekg] = await Promise.all([Daten.withings(), Daten.ekg()]);
+  const da = new Set(w.messungen.map((r) => r[1]));
+  const kommt = [], fehlt = [];
+  for (const [typen, name] of W_GERAETEWERTE) (typen.some((t_) => da.has(t_)) ? kommt : fehlt).push(name);
+  (ekg.length ? kommt : fehlt).push("EKG");
+  return { kommt, fehlt, abgelehnt: (w.abgelehnt || []).map((t_) => wName(+t_)) };
+}
 async function ansichtStatus() {
   const idx = Daten.index;
   const q = idx.quellen || {};
   const protokoll = ((await Daten.datei("d/protokoll.enc")) || {}).zeilen || [];
+  const bestand = await withingsBestand();
   const quelleBlock = (name, st, extra) => {
     let zustand;
     if (!st || !st.verbunden) zustand = chip("nicht verbunden", "neutral");
@@ -2864,6 +3054,13 @@ async function ansichtStatus() {
       { name: "EKG", wert: zahl(idx.zaehler?.ekg || 0) }, { name: "Arten von Tageswerten", wert: zahl(idx.zaehler?.metriken || 0) },
       { name: "Jahre", wert: (idx.jahre || []).length ? `${idx.jahre[0]}–${idx.jahre[idx.jahre.length - 1]}` : "–" },
     ])),
+    abschnitt("Was Withings liefert", "Die App zeigt nur Werte, die über die Schnittstelle von Withings ankommen. Was dort nicht ankommt, blendet sie aus.",
+      h("dl", { class: "bestand-liste" }, [
+        ["Kommt an", bestand.kommt.join(", ") || "noch nichts"],
+        bestand.fehlt.length ? ["Kommt nicht an", bestand.fehlt.join(", ")] : null,
+        bestand.abgelehnt.length ? ["Von Withings abgelehnt", bestand.abgelehnt.join(", ")] : null,
+      ].filter(Boolean).flatMap(([dt, dd]) => [h("dt", null, dt), h("dd", null, dd)])),
+      bestand.fehlt.length ? h("p", { class: "fussnote" }, "Die Withings-App zeigt manche dieser Werte, gibt sie über die Schnittstelle aber nicht für jedes Konto heraus. Sobald Withings einen Wert liefert, erscheint er in der App von selbst.") : null),
     abschnitt("Darstellung", null, h("div", { class: "segmente", role: "group", "aria-label": "Darstellung" }, [["system", "Wie das Gerät"], ["light", "Hell"], ["dark", "Dunkel"]].map(([w_, t]) =>
       h("button", { type: "button", "aria-pressed": String(darstellung === w_), onclick: () => {
         speicher.set(S.darstellung, w_ === "system" ? null : w_);
@@ -3116,6 +3313,124 @@ const Sync = {
 };
 
 // ======================================================================
+// Neue Version gleich beim Öffnen laden (nicht erst beim zweiten Mal)
+// ======================================================================
+const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+// Höchstens einmal je Sitzung und Version von selbst neu laden (sonst droht eine Schleife)
+const sitzung = {
+  get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ohne Speicher */ } },
+};
+const Aktualisierung = {
+  beginn: Date.now(), hatteSteuerung: false, neu: null, angefragt: null, laedt: false, element: null, reg: null, versuche: 0, wartet: null, aktiviert: false,
+  async start() {
+    if (!("serviceWorker" in navigator) || location.protocol !== "https:") return;
+    this.hatteSteuerung = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener("controllerchange", () => this.uebernommen());
+    try {
+      this.reg = (await navigator.serviceWorker.getRegistration()) || (await navigator.serviceWorker.register(`sw.js?v=${APP_VERSION}`));
+    } catch { return; }
+    this.reg.addEventListener("updatefound", () => this.beobachten(this.reg.installing));
+    this.beobachten(this.reg.installing);
+    await this.pruefen(); // findet auch eine schon geladene, noch wartende neue Version
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) this.pruefen(); });
+    setInterval(() => { if (!document.hidden) this.pruefen(); }, 30 * 60 * 1000);
+  },
+  beobachten(w) {
+    if (!w) return;
+    w.addEventListener("statechange", () => {
+      if (w.state === "installed") this.bereit();
+      // Laden abgebrochen (zum Beispiel Netz weg): gleich noch einmal versuchen
+      if (w.state === "redundant") { this.angefragt = null; this.spaeter(); }
+    });
+  },
+  spaeter() {
+    // Nach dem Öffnen ein paar weitere Versuche, falls das Netz gerade hakt
+    if (this.versuche >= 3) return;
+    this.versuche += 1;
+    setTimeout(() => this.pruefen(), 4000 * this.versuche);
+  },
+  /** Neue Version ist vollständig geladen. Der Browser lässt sie nur übernehmen, wenn die laufende
+      Version gerade nichts zu tun hat – und prüft das nicht von selbst nach. Deshalb hier warten, bis
+      sie ruhig ist, und erst dann übernehmen lassen. Klappt das nicht, hilft Neuladen. */
+  async bereit() {
+    if (this.aktiviert) return;
+    this.aktiviert = true;
+    const ende = Date.now() + 10000;
+    while (Date.now() < ende && this.reg && this.reg.waiting && !(await this.ruhig())) await pause(300);
+    await pause(150);
+    if (!this.reg || !this.reg.waiting || this.laedt) return;
+    this.reg.waiting.postMessage("aktivieren");
+    clearTimeout(this.wartet);
+    this.wartet = setTimeout(async () => {
+      if (this.laedt || !this.reg || !this.reg.waiting) return; // inzwischen übernommen
+      const bis = Date.now() + 5000;
+      while (Date.now() < bis && !(await this.ruhig())) await pause(300);
+      this.neuLaden(true);
+    }, 3000);
+  },
+  /** Hat die laufende Version noch Abrufe offen? (Ältere Fassungen antworten nicht: dann ja, ruhig.) */
+  ruhig() {
+    const c = navigator.serviceWorker.controller;
+    if (!c) return Promise.resolve(true);
+    return new Promise((ok) => {
+      const kanal = new MessageChannel();
+      const zeit = setTimeout(() => ok(true), 1000);
+      kanal.port1.onmessage = (e) => { clearTimeout(zeit); ok(!(e.data && e.data.offen > 0)); };
+      try { c.postMessage("ruhig", [kanal.port2]); } catch { clearTimeout(zeit); ok(true); }
+    });
+  },
+  neuLaden(vonSelbst) {
+    if (vonSelbst) {
+      // Nur gleich nach dem Öffnen oder im Hintergrund, und je Version nur einmal; sonst fragen
+      const eben = Date.now() - this.beginn < 20000 || document.hidden;
+      if (!eben || sitzung.get("gesundheit.neu-geladen") === (this.neu || "?")) { this.zeigen(); return; }
+      sitzung.set("gesundheit.neu-geladen", this.neu || "?");
+    }
+    this.laedt = true;
+    location.reload();
+  },
+  async version() {
+    try {
+      const r = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
+      return r.ok ? String((await r.json()).version || "") || null : null;
+    } catch { return null; }
+  },
+  async pruefen() {
+    const v = await this.version();
+    if (v && v !== APP_VERSION) this.neu = v;
+    // Eine schon fertig geladene Version übernehmen lassen, auch wenn diese Seite sie selbst schon zeigt
+    if (this.reg && this.reg.waiting) { this.bereit(); return; }
+    if (!v) { this.spaeter(); return; }
+    if (v === APP_VERSION) return;
+    if (!this.reg) return;
+    if (this.reg.installing) return; // wird gerade geladen
+    if (this.angefragt === v) return;
+    this.angefragt = v;
+    // Der Service Worker unter neuer Adresse umgeht alle Zwischenspeicher und holt die neue Version sofort
+    try { await navigator.serviceWorker.register(`sw.js?v=${encodeURIComponent(v)}`); } catch { this.angefragt = null; this.spaeter(); }
+  },
+  async uebernommen() {
+    const vorher = this.hatteSteuerung;
+    this.hatteSteuerung = true;
+    clearTimeout(this.wartet);
+    if (!vorher || this.laedt) return;
+    if (!this.neu) { const v = await this.version(); if (v && v !== APP_VERSION) this.neu = v; }
+    if (!this.neu) return;
+    // Gerade erst geöffnet oder im Hintergrund: gleich neu laden; sonst fragen, damit nichts verloren geht
+    if (Date.now() - this.beginn < 20000 || document.hidden) { this.laedt = true; location.reload(); return; }
+    this.zeigen();
+  },
+  zeigen() {
+    if (this.element) return;
+    this.element = h("div", { class: "update-meldung", role: "status", "aria-live": "polite" },
+      icon("sync", 20), h("span", null, this.neu ? `Version ${this.neu} ist da.` : "Eine neue Version ist da."),
+      h("button", { type: "button", class: "knopf", onclick: () => this.neuLaden(false) }, "Neu laden"));
+    document.body.append(this.element);
+  },
+};
+
+// ======================================================================
 // Gerüst, Navigation, Router
 // ======================================================================
 const NAV = [["heute", "Heute"], ["koerper", "Körper"], ["herz", "Herz"], ["schlaf", "Schlaf"], ["sport", "Sport"], ["hinweise", "Hinweise"]];
@@ -3267,6 +3582,7 @@ function tor(fehlertext) {
 // Start
 // ======================================================================
 async function start() {
+  Aktualisierung.start();
   const m = location.hash.match(/k=([A-Za-z0-9_-]{43})/);
   if (m) { speicher.set(S.schluessel, m[1]); history.replaceState(null, "", location.pathname + location.search + "#heute"); }
   const k = speicher.get(S.schluessel);
@@ -3301,7 +3617,6 @@ async function start() {
     try { await Daten.ladeIndex(); } catch { return; }
     if (Daten.index && Daten.index.stand !== alt) { Daten.cache.clear(); standZeigen(); neuZeichnen(); } else standZeigen();
   }, 10 * 60 * 1000);
-  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 document.addEventListener("DOMContentLoaded", start);
 })();

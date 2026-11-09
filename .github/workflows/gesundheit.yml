@@ -1,5 +1,7 @@
 # Gesundheits-App: holt stündlich alle Withings- und Garmin-Daten, speichert sie
-# verschlüsselt im Zweig "daten" und veröffentlicht die Web-App über GitHub Pages.
+# verschlüsselt im Zweig "daten" und veröffentlicht danach die Web-App über GitHub Pages
+# (immer mit der neuesten App-Fassung). Neue App-Versionen allein veröffentlicht
+# "veroeffentlichen.yml" sofort, ohne auf diesen Abruf zu warten.
 name: Gesundheit
 
 on:
@@ -12,7 +14,6 @@ on:
       - "zustand.enc"
       - "sammler.py"
       - "requirements.txt"
-      - "web/**"
       - ".github/workflows/gesundheit.yml"
 
 permissions:
@@ -20,17 +21,13 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: gesundheit
-  cancel-in-progress: false
-
 jobs:
   abruf:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment:
-      name: github-pages
-      url: ${{ steps.bereitstellen.outputs.page_url }}
+    concurrency:
+      group: gesundheit
+      cancel-in-progress: false
     steps:
       - name: Programm holen
         uses: actions/checkout@v7
@@ -54,7 +51,7 @@ jobs:
             mkdir -p ablage
           fi
 
-      - name: Daten abrufen und Seite bauen
+      - name: Daten abrufen
         env:
           GESUNDHEIT_SCHLUESSEL: ${{ secrets.GESUNDHEIT_SCHLUESSEL }}
         run: python sammler.py --ablage ablage --web web --seite _site --paket zustand.enc
@@ -76,6 +73,41 @@ jobs:
             sleep 5
           done
           exit 1
+
+  # Veröffentlichen als eigener Schritt: baut die Seite aus der neuesten App (Zweig main) und
+  # den eben gesicherten Daten, damit nie eine ältere App-Fassung eine neuere überschreibt
+  seite:
+    needs: abruf
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: seite
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.bereitstellen.outputs.page_url }}
+    steps:
+      - name: Neueste App holen
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Neueste Daten holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git clone --quiet --depth 1 --branch daten "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ablage 2>/dev/null; then
+            rm -rf ablage/.git
+          else
+            mkdir -p ablage
+          fi
+
+      - name: Seite bauen
+        run: |
+          rm -rf _site
+          cp -r web _site
+          if [ -d ablage/d ]; then cp -r ablage/d _site/d; fi
 
       - name: Seite hochladen
         uses: actions/upload-pages-artifact@v5
