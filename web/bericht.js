@@ -12,6 +12,7 @@ const F = {
   tinte: [18, 38, 46], tinte2: [74, 91, 98], tinte3: [95, 108, 114], linie: [220, 227, 227], stark: [195, 204, 206],
   wash: [243, 246, 246], rose: [184, 51, 79], roseZart: [246, 214, 221], roseMittel: [231, 161, 174],
   gut: [12, 130, 12], ernst: [196, 84, 40], kritisch: [190, 46, 46],
+  warnung: [125, 83, 0], // dunkles Gelb wie in der App, auf weißem Papier gut lesbar
 };
 // Diagrammfarben: immer die helle Fassung, Papier ist weiß
 const P = {
@@ -32,7 +33,7 @@ function t(s) {
 }
 
 let C, O, doc, y;
-const VERSION = "1.2.3";
+const VERSION = "1.2.5";
 
 // Diese Hilfen gibt die App seit Version 1.2.2 mit. Eine ältere App, die nach einem Update kurz
 // diesen neueren Berichtsteil lädt, kennt sie noch nicht – dann gelten diese gleichlautenden Fassungen.
@@ -72,14 +73,6 @@ const RUECKFALL = {
     const wg = C.letzter(C.wReihe(w, 4));
     const groesse = cm ? cm / 100 : wg && wg[1] > 1 && wg[1] < 2.5 ? wg[1] : null;
     return { geschlecht, alter, groesse, fitness: fa };
-  },
-  // Bereiche wie in der Withings-App (seit App 1.2.3): Untergrenzen nach Körpergröße, in kg
-  koerperZonen(p) {
-    const ug = { w: { mager: 15.5, wasser: 10.3, knochen: 0.78 }, m: { mager: 18, wasser: 11.96, knochen: 0.91 } }[p.geschlecht];
-    if (!ug || !p.groesse) return {};
-    const h2 = p.groesse * p.groesse;
-    const mehr = (u) => ({ grenzen: [u, u * 1.25] });
-    return { mager: mehr(ug.mager * h2), muskel: mehr((ug.mager - ug.knochen) * h2), wasser: mehr(ug.wasser * h2), knochen: mehr(ug.knochen * h2) };
   },
   ekgKlasse(e) { // 0 unauffällig, 1 Vorhofflimmern, 2 nicht eindeutig, null ohne Auswertung
     if (e.afib === 0 || e.afib === 1 || e.afib === 2) return e.afib;
@@ -299,7 +292,9 @@ async function sammeln() {
 
 // ---------------------------------------------------------------- Bausteine je Bereich
 const BP_FARBEN = { sys: P.serie[0], dia: P.serie[1] };
-function bpMittel(l) { return l.length ? { sys: mittel(l.map((m) => m.sys)), dia: mittel(l.map((m) => m.dia)), puls: mittel(l.map((m) => m.puls).filter(Number.isFinite)), n: l.length, tage: new Set(l.map((m) => C.isoAusMs(m.ts))).size } : null; }
+const rund = (v, stellen = 0) => (v == null || !Number.isFinite(v) ? v : Math.round(v * 10 ** stellen) / 10 ** stellen);
+// Mittelwerte so gerundet, wie sie im Bericht stehen – eingeordnet wird der angezeigte Wert
+function bpMittel(l) { return l.length ? { sys: rund(mittel(l.map((m) => m.sys))), dia: rund(mittel(l.map((m) => m.dia))), puls: rund(mittel(l.map((m) => m.puls).filter(Number.isFinite))), n: l.length, tage: new Set(l.map((m) => C.isoAusMs(m.ts))).size } : null; }
 const bpText = (x) => (x ? `${zahl(x.sys)}/${zahl(x.dia)} mmHg` : "–");
 function letzte7Tage(bp) {
   const tage = [...new Set(bp.map((m) => C.isoAusMs(m.ts)))].sort().slice(-7);
@@ -381,14 +376,25 @@ function bpEinordnung(x) {
   if (x.sys >= 120 || x.dia >= 80) return [GRENZWERTIG, "über dem Optimalbereich (unter 120/80 mmHg)"];
   return null;
 }
-function bereichEinordnung(art, wert, p, name, { nurNiedrig = false } = {}) {
-  if (wert == null) return null;
-  const ber = C.wBereich(art, p);
-  if (!ber) return null;
-  const [a, b] = ber;
-  const wer = `${p.geschlecht === "w" ? "Frauen" : "Männer"}${C.W_BEREICHE[art][p.geschlecht].length > 1 ? " dieses Alters" : ""}`;
-  if (!nurNiedrig && wert > b) return [GRENZWERTIG, `${name} ${zahl(wert, 1)} % liegt über dem Normalbereich der Waage für ${wer} (${C.spanne(a, b, "%")})`];
-  if (wert < a) return [GRENZWERTIG, `${name} ${zahl(wert, 1)} % liegt unter dem Normalbereich der Waage für ${wer} (${C.spanne(a, b, "%")})`];
+// Ärztliche Normen für die Körperwerte (dieselben wie in der App): Körperfett nach Gallagher und Kollegen 2000
+// [bis Alter, niedrig unter, erhöht ab, stark erhöht ab], Muskeln an Armen und Beinen nach EWGSOP2 2019 (kg/m²)
+const FETT_NORM = { w: [[39, 21, 33, 39], [59, 23, 34, 40], [999, 24, 36, 42]], m: [[39, 8, 20, 25], [59, 11, 22, 28], [999, 13, 25, 30]] };
+const ASMI_GRENZE = { w: 5.5, m: 7 };
+function fettNorm(p) {
+  const t_ = FETT_NORM[p.geschlecht];
+  if (!t_ || p.alter == null) return null;
+  const [bis, ...grenzen] = t_.find(([b]) => p.alter <= b) || t_[t_.length - 1];
+  return { grenzen, gruppe: `${p.geschlecht === "w" ? "Frauen" : "Männer"} ${bis === 39 ? "bis 39 Jahre" : bis === 59 ? "von 40 bis 59 Jahren" : "ab 60 Jahren"}` };
+}
+const GRUNDLAGEN = "Grundlage: Blutdruck ESH 2023/Deutsche Hochdruckliga; QTc AHA/ACCF/HRS 2009; Pulswellengeschwindigkeit Reference Values for Arterial Stiffness' Collaboration 2010; BMI WHO; Körperfett Gallagher et al. 2000; Muskeln EWGSOP2 2019; Sauerstoffsättigung BTS 2017; Schlafdauer National Sleep Foundation 2015; Bewegung WHO 2020. Viszeralfett, Schlafscore, Stress und HRV-Status sind Einschätzungen von Withings bzw. Garmin ohne ärztliche Norm.";
+function fettEinordnung(wert, p) {
+  const f = fettNorm(p);
+  if (wert == null || !f) return null;
+  const [niedrig, hoch, sehr] = f.grenzen;
+  const normal = `normal ${zahl(niedrig)}–${zahl(hoch - 0.1, 1)} % für ${f.gruppe}, Gallagher 2000`;
+  if (wert >= sehr) return [AUFFAELLIG, `stark erhöht, Bereich der Adipositas (${normal})`];
+  if (wert >= hoch) return [GRENZWERTIG, `erhöht (${normal})`];
+  if (wert < niedrig) return [GRENZWERTIG, `niedrig (${normal})`];
   return null;
 }
 function uebersicht(d) {
@@ -401,9 +407,9 @@ function uebersicht(d) {
     if (einordnung) markiert++;
     const stufe = einordnung && einordnung[0];
     return [name,
-      { content: wert, styles: { fontStyle: fett || stufe === AUFFAELLIG ? "bold" : "normal", textColor: einordnung ? F.kritisch : F.tinte } },
+      { content: wert, styles: { fontStyle: fett || stufe === AUFFAELLIG ? "bold" : "normal", textColor: einordnung ? (stufe === AUFFAELLIG ? F.kritisch : F.warnung) : F.tinte } },
       bezug || "",
-      einordnung ? { content: `${stufe === AUFFAELLIG ? "Auffällig" : "Grenzwertig"}: ${einordnung[1]}.`, styles: { textColor: F.kritisch } } : ""];
+      einordnung ? { content: `${stufe === AUFFAELLIG ? "Auffällig" : "Grenzwertig"}: ${einordnung[1]}.`, styles: { textColor: stufe === AUFFAELLIG ? F.kritisch : F.warnung } } : ""];
   };
   if (d.bp.length) {
     const g = bpMittel(d.bp), mo = bpMittel(d.bp.filter((m) => C.istMorgens(m.ts))), ab = bpMittel(d.bp.filter((m) => !C.istMorgens(m.ts)));
@@ -464,27 +470,29 @@ function uebersicht(d) {
     const [a, e] = anfangEnde(gew);
     koerper.push(zeile("Gewicht", `${zahl(e[1], 1)} kg`, gew.length > 1 ? `${pm(e[1] - a[1], 1)} kg seit ${msDatum(a[0])}` : `am ${msDatum(e[0])}`, null, true));
     if (d.groesse) {
-      const bmi = e[1] / (d.groesse * d.groesse);
-      const eb = bmi >= 30 ? [AUFFAELLIG, "Adipositas (WHO: ab 30; Normalgewicht 18,5–24,9)"] : bmi >= 25 ? [GRENZWERTIG, "Übergewicht (WHO: 25–29,9; Normalgewicht 18,5–24,9)"]
+      const bmi = rund(e[1] / (d.groesse * d.groesse), 1);
+      const eb = bmi >= 30 ? [AUFFAELLIG, `Adipositas Grad ${bmi >= 40 ? "III" : bmi >= 35 ? "II" : "I"} (WHO: ab 30; Normalgewicht 18,5–24,9)`] : bmi >= 25 ? [GRENZWERTIG, "Übergewicht (WHO: 25–29,9; Normalgewicht 18,5–24,9)"]
         : bmi < 18.5 ? [GRENZWERTIG, "Untergewicht (WHO: unter 18,5; Normalgewicht 18,5–24,9)"] : null;
       koerper.push(zeile("Body-Mass-Index", `${zahl(bmi, 1)} kg/m²`, `bei ${zahl(d.groesse * 100)} cm`, eb));
     }
   }
   const fett = d.wr(6), muskel = d.wr(76), visz = d.wr(170);
-  if (fett.length) { const [a, e] = anfangEnde(fett); koerper.push(zeile("Körperfettanteil", `${zahl(e[1], 1)} %`, fett.length > 1 ? `${pm(e[1] - a[1], 1)} Prozentpunkte` : "", bereichEinordnung("fett", e[1], p, "Körperfettanteil"))); }
+  if (fett.length) { const [a, e] = anfangEnde(fett); koerper.push(zeile("Körperfettanteil", `${zahl(e[1], 1)} %`, fett.length > 1 ? `${pm(e[1] - a[1], 1)} Prozentpunkte` : "", fettEinordnung(rund(e[1], 1), p))); }
   if (muskel.length) {
     const [a, e] = anfangEnde(muskel);
-    // Wie in der Withings-App: Muskelmasse in kg, Untergrenze nach Körpergröße (der Anteil am Gewicht hinge vom Fett ab)
-    const zone = C.koerperZonen(p).muskel;
-    const eb = zone && e[1] < zone.grenzen[0]
-      ? [GRENZWERTIG, `unter dem Normalbereich der Withings-App für ${p.geschlecht === "w" ? "Frauen" : "Männer"} mit ${zahl(p.groesse * 100)} cm (ab ${zahl(zone.grenzen[0], 1)} kg)`]
-      : null;
-    koerper.push(zeile("Muskelmasse", `${zahl(e[1], 1)} kg`, muskel.length > 1 ? `${pm(e[1] - a[1], 1)} kg` : "", eb));
+    koerper.push(zeile("Muskelmasse gesamt", `${zahl(e[1], 1)} kg`, muskel.length > 1 ? `${pm(e[1] - a[1], 1)} kg` : "", null));
+  }
+  // Muskeln an Armen und Beinen (Body Scan je Körperbereich) – ärztlich nach der Sarkopenie-Leitlinie EWGSOP2
+  const glieder = [2, 3, 10, 11].map((pos) => C.letzter(d.wr(175, pos)));
+  if (glieder.every(Boolean) && p.geschlecht && p.groesse) {
+    const kg = glieder.reduce((s_, x) => s_ + x[1], 0), idx = rund(kg / (p.groesse * p.groesse), 1), grenze = ASMI_GRENZE[p.geschlecht];
+    koerper.push(zeile("Muskeln an Armen und Beinen", `${zahl(kg, 1)} kg`, `${zahl(idx, 1)} kg/m² (EWGSOP2: niedrig unter ${zahl(grenze, 1)})`,
+      idx < grenze ? [GRENZWERTIG, `niedrig nach der Sarkopenie-Leitlinie EWGSOP2 (unter ${zahl(grenze, 1)} kg/m²); Kraft prüfen`] : null));
   }
   if (visz.length) {
     const v = C.letzter(visz)[1];
-    koerper.push(zeile("Viszeralfett", zahl(v, 1), "Index der Body Scan", v > 10 ? [AUFFAELLIG, "sehr hoch; Withings stuft bis 5 als gut ein, bis 10 als hoch, darüber als sehr hoch"]
-      : v > 5 ? [GRENZWERTIG, "hoch; Withings stuft bis 5 als gut ein, bis 10 als hoch"] : null));
+    koerper.push(zeile("Viszeralfett", zahl(v, 1), "Index von Withings, keine ärztliche Norm", v > 10 ? [GRENZWERTIG, "laut Withings sehr hoch (bis 5 gut, bis 10 hoch); Bauchumfang messen"]
+      : v > 5 ? [GRENZWERTIG, "laut Withings hoch (bis 5 gut, bis 10 hoch); Bauchumfang messen"] : null));
   }
   if (koerper.length) { z.push(gruppe("Körper")); z.push(...koerper); }
   const schlaf = [];
@@ -502,9 +510,9 @@ function uebersicht(d) {
       m < 60 ? [AUFFAELLIG, "schlechte Schlafqualität (Garmin: unter 60 schlecht, ab 80 gut)"] : m < 80 ? [GRENZWERTIG, "mittlere Schlafqualität (Garmin: ab 80 gut)"] : null));
   }
   if (sp.length) {
-    const tief = werteVon(d.spo2Tief), m = mittel(sp);
+    const tief = werteVon(d.spo2Tief), m = rund(mittel(sp));
     schlaf.push(zeile("Sauerstoffsättigung im Schlaf", `${zahl(m)} %`, tief.length ? `Mittelwert; niedrigster Wert ${zahl(Math.min(...tief))} %` : "Mittelwert",
-      m < 90 ? [AUFFAELLIG, "unter 90 % (normal 95–100 %; Messung am Handgelenk)"] : m < 95 ? [GRENZWERTIG, "unter dem Normalbereich 95–100 % (Messung am Handgelenk, eher ungenau)"] : null));
+      m < 90 ? [AUFFAELLIG, "unter 90 % (Normalbereich 94–98 % nach BTS; Messung am Handgelenk)"] : m < 94 ? [GRENZWERTIG, "unter dem Normalbereich 94–98 % (BTS; Messung am Handgelenk, eher ungenau)"] : null));
   }
   if (at.length) {
     const m = mittel(at);
@@ -526,8 +534,8 @@ function uebersicht(d) {
   if (!z.length) { absatz("Für diesen Zeitraum liegen keine Messwerte vor."); return; }
   tabelle(["Kennzahl", "Wert", "Bezug", "Einordnung"], z, { spalten: { 0: { cellWidth: 44 }, 1: { cellWidth: 26 }, 2: { cellWidth: 48 } }, abstand: 2.5 });
   absatz(markiert
-    ? "Rot: Wert außerhalb des Optimal- oder Normalbereichs – „Grenzwertig“ knapp außerhalb, „Auffällig“ deutlich. Grundlage: Deutsche Hochdruckliga/ESH, WHO, National Sleep Foundation sowie die Angaben von Withings und Garmin."
-    : "Alle Werte der Übersicht liegen im Optimal- oder Normalbereich (Deutsche Hochdruckliga/ESH, WHO, National Sleep Foundation, Withings, Garmin).",
+    ? `Farbig: Wert außerhalb des Optimal- oder Normalbereichs – „Grenzwertig“ (gelbbraun) knapp außerhalb, „Auffällig“ (rot) deutlich. ${GRUNDLAGEN}`
+    : `Alle Werte der Übersicht liegen im Optimal- oder Normalbereich. ${GRUNDLAGEN}`,
   { groesse: 7.8, farbe: F.tinte3, abstand: 4 });
 }
 function intensitaetProWoche(d) {

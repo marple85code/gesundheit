@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2.3";
+const APP_VERSION = "1.2.5";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -72,6 +72,7 @@ const ICON = {
   status: '<circle cx="12" cy="12" r="8.6"/><path d="m8.3 12.3 2.4 2.4 5-5.2"/>',
   zurueck: '<path d="M14.5 5.5 8 12l6.5 6.5"/>',
   vor: '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
+  unten: '<path d="M5.5 9.5 12 16l6.5-6.5"/>',
   zu: '<path d="M6 6l12 12M18 6 6 18"/>',
   info: '<circle cx="12" cy="12" r="8.6"/><path d="M12 11v5.2M12 7.7v.2"/>',
   warnung: '<path d="M12 4 2.8 19.5h18.4Z"/><path d="M12 10v4.4M12 16.9v.2"/>',
@@ -164,14 +165,17 @@ function zeitText(sek) {
   return std ? `${std}:${zweistellig(min)}:${zweistellig(sk)}` : `${min}:${zweistellig(sk)}`;
 }
 const RTF = new Intl.RelativeTimeFormat("de-DE", { numeric: "auto" });
-function vorZeit(iso) {
+const RTF_KURZ = new Intl.RelativeTimeFormat("de-DE", { numeric: "auto", style: "short" });
+/** „vor 23 Stunden“, mit kurz=true „vor 23 Std.“ für schmale Handys */
+function vorZeit(iso, kurz = false) {
   if (!iso) return "–";
+  const f = kurz ? RTF_KURZ : RTF;
   const diff = (Date.parse(iso) - Date.now()) / 1000;
   const a = Math.abs(diff);
   if (a < 90) return "gerade eben";
-  if (a < 3600) return RTF.format(Math.round(diff / 60), "minute");
-  if (a < 86400) return RTF.format(Math.round(diff / 3600), "hour");
-  return RTF.format(Math.round(diff / 86400), "day");
+  if (a < 3600) return f.format(Math.round(diff / 60), "minute");
+  if (a < 86400) return f.format(Math.round(diff / 3600), "hour");
+  return f.format(Math.round(diff / 86400), "day");
 }
 function tempoText(mps, laufen) {
   if (!mps || !Number.isFinite(mps)) return "–";
@@ -332,6 +336,8 @@ const W_TYPEN = {
   196: ["Elektrodermale Aktivität Füße", "", 0], 197: ["Elektrodermale Aktivität links", "", 0], 198: ["Elektrodermale Aktivität rechts", "", 0],
   226: ["Grundumsatz", "kcal", 0], 227: ["Stoffwechselalter", "Jahre", 0], 229: ["Elektrochemische Hautleitfähigkeit", "", 0],
 };
+/** Kleinste Achsenspanne je Körperwert, damit Messrauschen der Waage nicht wie eine Veränderung aussieht */
+const KOERPER_SPANNE = { 6: 4, 8: 3, 5: 3, 76: 3, 77: 3, 88: 0.5, 170: 3, 226: 150, 227: 6, 168: 2, 169: 2 };
 const POSITIONEN = { 0: "rechtes Handgelenk", 1: "linkes Handgelenk", 2: "rechter Arm", 3: "linker Arm", 4: "rechter Fuß", 5: "linker Fuß",
   8: "linke Körperhälfte", 9: "rechte Körperhälfte", 10: "linkes Bein", 11: "rechtes Bein", 12: "Rumpf", 13: "linke Hand", 14: "rechte Hand" };
 function wName(typ, pos = -1) {
@@ -510,12 +516,12 @@ function sportName(typ) { return (SPORT[typ] || [String(typ || "Sonstiges").repl
 function sportIcon(typ) { return (SPORT[typ] || [0, "sonst"])[1]; }
 function istLauf(typ) { return sportIcon(typ) === "lauf"; }
 
-// ---- Blutdruck nach ESH
+// ---- Blutdruck-Einzelwerte nach den Grenzwerten für die Messung zu Hause (ESH 2023, Deutsche Hochdruckliga):
+// Zu Hause gilt ab 135/85 mmHg als über dem Grenzwert – die Stufen „hoch-normal“ und „Grad 1–3“ sind für die
+// Messung in der Praxis gemacht. Optimal wie beim Mittelwert unter 120/80, sehr hoch ab 180/110.
 function bpKlasse(sys, dia) {
-  if (sys >= 180 || dia >= 110) return ["Grad 3", "kritisch"];
-  if (sys >= 160 || dia >= 100) return ["Grad 2", "kritisch"];
-  if (sys >= 140 || dia >= 90) return ["Grad 1", "ernst"];
-  if (sys >= 130 || dia >= 85) return ["hoch-normal", "warnung"];
+  if (sys >= 180 || dia >= 110) return ["sehr hoch", "kritisch"];
+  if (sys >= 135 || dia >= 85) return ["erhöht", "warnung"];
   if (sys >= 120 || dia >= 80) return ["normal", "gut"];
   return ["optimal", "gut"];
 }
@@ -563,6 +569,45 @@ function tooltipZeile(farbe_, wert, name) {
   return `<div style="display:flex;align-items:center;gap:8px;margin-top:3px"><i style="display:inline-block;width:12px;height:3px;border-radius:2px;background:${farbe_}"></i><b style="font-weight:650">${esc(wert)}</b><span style="color:${css("--tinte-2")}">${esc(name)}</span></div>`;
 }
 function xWert(x) { return typeof x === "string" ? tagMs(x) : x; }
+/** Runde Schrittweite für die y-Achse; bei Zeiten in Sekunden in Uhr-Schritten, bei ganzen Zahlen ohne Komma */
+function schoenerSchritt(roh, zeit = false, ganz = false) {
+  if (!(roh > 0)) return 1;
+  if (zeit) return [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600].find((x) => x >= roh) || 3600 * Math.ceil(roh / 3600);
+  const p = 10 ** Math.floor(Math.log10(roh));
+  const f = roh / p;
+  const schritt = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  return ganz ? Math.max(1, schritt === 2.5 ? 5 : Math.round(schritt)) : schritt;
+}
+/** Feste y-Grenzen, damit kleine Schwankungen nicht übertrieben wirken:
+ *  Die Achse umfasst mindestens opt.minSpanne (sonst 4 % des Mittelwerts). */
+function yBereich(serien, opt) {
+  if (opt.nullBasis || opt.yMin != null || opt.yMax != null) return {};
+  const ys = [];
+  const gestapelt = new Map();
+  for (const se of serien) for (const p of se.daten) {
+    let v = p[1];
+    if (v == null || !Number.isFinite(v)) continue;
+    if (se.stapel) { const key = `${se.stapel}|${xWert(p[0])}`; v += gestapelt.get(key) || 0; gestapelt.set(key, v); }
+    ys.push(v);
+  }
+  for (const r of opt.referenzen || []) if (Number.isFinite(r.wert)) ys.push(r.wert);
+  if (!ys.length) return {};
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  const mindest = opt.minSpanne ?? Math.abs((lo + hi) / 2) * 0.04;
+  const zuEng = mindest > 0 && hi - lo < mindest;
+  if (!zuEng && !opt.zeitAchse) return {};
+  if (zuEng) {
+    const mitte = (lo + hi) / 2;
+    const unten = Math.min(...ys) >= 0 ? Math.max(0, mitte - mindest / 2) : mitte - mindest / 2;
+    lo = unten; hi = unten + mindest;
+  }
+  const schritt = schoenerSchritt((hi - lo) / 4 || Math.abs(hi) / 8, opt.zeitAchse, ys.every(Number.isInteger));
+  const fein = (x) => +x.toPrecision(12);
+  const min = fein(Math.floor(lo / schritt) * schritt);
+  let max = fein(Math.ceil(hi / schritt) * schritt);
+  if (max <= min) max = fein(min + schritt);
+  return { min, max, intervall: schritt };
+}
 
 /** Liniendiagramm / Balken auf Zeitachse.
  *  serien: [{name, daten:[[x,y]], slot, art:'linie'|'balken'|'punkte', stellen, einheit, stapel, gestrichelt, endWert, format}] */
@@ -572,6 +617,7 @@ function zeitDiagramm(div, serien, opt = {}) {
   const spanne = Number.isFinite(min) ? (max - min) / 86400000 : 30;
   const linie = css("--linie"), stark = css("--linie-stark");
   const flaechenFarbe = css("--blatt");
+  const yb = yBereich(serien, opt);
   const option = {
     animation: BEWEGUNG, animationDuration: 380,
     grid: { left: 4, right: opt.rechts ?? 44, top: opt.oben ?? 14, bottom: 4, containLabel: true },
@@ -582,7 +628,7 @@ function zeitDiagramm(div, serien, opt = {}) {
       splitLine: { show: false }, axisPointer: { show: true, type: "line", lineStyle: { color: css("--tinte-3"), width: 1 }, label: { show: false } },
     },
     yAxis: {
-      type: "value", scale: opt.nullBasis ? false : true, min: opt.yMin, max: opt.yMax, interval: opt.yIntervall, inverse: Boolean(opt.umgekehrt),
+      type: "value", scale: opt.nullBasis ? false : true, min: opt.yMin ?? yb.min, max: opt.yMax ?? yb.max, interval: opt.yIntervall ?? yb.intervall, inverse: Boolean(opt.umgekehrt),
       splitNumber: 4, axisLine: { show: false }, axisTick: { show: false },
       axisLabel: { ...textStil(), formatter: opt.yFormat || achsenZahl },
       splitLine: { lineStyle: { color: linie, width: 1 } },
@@ -676,11 +722,25 @@ function figur({ titel, wert, serien, opt = {}, hoehe = "", legende, fussnote, t
   NACH.push(() => (zeichnen ? zeichnen(flaeche) : zeitDiagramm(flaeche, serien, opt)));
   return f;
 }
+/** Chip-Reihe am Handy: Sie lässt sich seitlich wischen. Solange rechts noch Chips folgen, läuft sie
+ *  dort sanft aus, und der gewählte Chip wird in den sichtbaren Bereich gerückt. */
+function chipsRand(box) {
+  const pruefen = () => box.classList.toggle("geht-weiter", box.scrollLeft + box.clientWidth < box.scrollWidth - 2);
+  box.addEventListener("scroll", pruefen, { passive: true });
+  new ResizeObserver(() => {
+    pruefen();
+    const an = box.querySelector('[aria-pressed="true"]');
+    if (an && box.scrollWidth > box.clientWidth && (an.offsetLeft + an.offsetWidth > box.scrollLeft + box.clientWidth || an.offsetLeft < box.scrollLeft)) {
+      box.scrollLeft = Math.max(0, an.offsetLeft - 24);
+    }
+  }).observe(box);
+  return box;
+}
 /** Ein Diagramm mit Auswahl-Chips darüber (statt vieler kleiner Diagramme untereinander) */
 function auswahlFigur(name, optionen, hoehe = "") {
   if (!optionen.length) return null;
   let aktiv = optionen[0].id;
-  const chipsBox = h("div", { class: "chips", role: "group", "aria-label": name });
+  const chipsBox = chipsRand(h("div", { class: "chips", role: "group", "aria-label": name }));
   const box = h("div", { style: { marginTop: "12px" } });
   const zeige = () => {
     chipsBox.replaceChildren(...optionen.map((o) => h("button", { type: "button", "aria-pressed": String(o.id === aktiv), onclick: () => { aktiv = o.id; zeige(); } }, o.name)));
@@ -737,13 +797,34 @@ function abschnitt(titel, beschreibung, ...inhalt) {
     h("div", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, titel), beschreibung ? h("p", null, beschreibung) : null)),
     ...inhalt);
 }
+/** Hängt einen Abschnitt an. Folgt er direkt auf den verwandten Abschnitt „vorher“,
+ *  stehen beide auf breiten Bildschirmen (Chromebook, Tablet quer) nebeneinander. */
+function nebenan(knoten, vorher, neu) {
+  if (vorher && knoten[knoten.length - 1] === vorher) knoten[knoten.length - 1] = h("div", { class: "raster zwei paar" }, vorher, neu);
+  else knoten.push(neu);
+}
+/** Abschnitt zum Auf- und Zuklappen: Kopf mit Pfeil, zugeklappt nur Titel und Kurzfassung. Dieses Gerät merkt sich, was offen ist. */
+function klappAbschnitt(id, titel, kurz, ...inhalt) {
+  const schluessel = `gesundheit.klapp.${id}`;
+  const d = h("details", { class: "abschnitt klapp", open: speicher.get(schluessel) === "1" || null },
+    h("summary", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, titel), kurz ? h("p", null, kurz) : null),
+      h("span", { class: "klapp-pfeil", "aria-hidden": "true" }, icon("unten", 22))),
+    ...inhalt);
+  d.addEventListener("toggle", () => {
+    speicher.set(schluessel, d.open ? "1" : null);
+    // Diagramme, die zugeklappt keine Größe hatten, jetzt richtig zeichnen
+    if (d.open && window.echarts) d.querySelectorAll(".flaeche").forEach((f) => { const c = echarts.getInstanceByDom(f); if (c) c.resize(); });
+  });
+  return d;
+}
 // Lange Statuswörter dürfen in Kacheln umbrechen (weiches Trennzeichen)
 const TRENNUNG = { Leistungsabbau: "Leistungs­abbau", Überlastung: "Über­lastung", überfordert: "über­fordert",
   unproduktiv: "un­produktiv", Höchstform: "Höchst­form", ausgeglichen: "aus­geglichen",
   unausgeglichen: "un­aus­geglichen", ausgezeichnet: "aus­gezeichnet", produktiv: "pro­duktiv" };
 function achtungSymbol(befund, groesse = 20) {
+  const kritisch = befund.stufe === "kritisch";
   return h("span", { class: `achtung stufe-${befund.stufe || "hinweis"}`, role: "img", title: befund.titel,
-    "aria-label": `Außerhalb des Optimalbereichs: ${befund.titel}` }, icon("achtung", groesse));
+    "aria-label": `${kritisch ? "Ärztlich abklären" : "Leicht außerhalb des Optimalbereichs"}: ${befund.titel}` }, icon("achtung", groesse));
 }
 function kachel({ titel, wert, einheit, unter, link, funkeDaten, extra, befund }) {
   const istText = typeof wert === "string" && /[A-Za-zÄÖÜäöüß]{3}/.test(wert);
@@ -757,14 +838,14 @@ function kachel({ titel, wert, einheit, unter, link, funkeDaten, extra, befund }
     befund ? h("span", { class: "kachel-befund" }, befund.kurz) : null,
     funkeDaten && funkeDaten.length > 1 ? funke(funkeDaten) : null,
   ];
-  const klasse = befund ? "kachel auffaellig" : "kachel";
+  const klasse = befund ? `kachel auffaellig stufe-${befund.stufe || "hinweis"}` : "kachel";
   return link ? h("a", { class: klasse, href: link }, inhalt) : h("div", { class: klasse }, inhalt);
 }
 function werteListe(eintraege) {
   return h("ul", { class: "werte" }, eintraege.filter(Boolean).map((e) =>
     h("li", { class: e.befund ? "auffaellig" : null }, h("span", { class: "name" }, e.name),
       h("span", { class: "zahl" }, e.befund ? achtungSymbol(e.befund, 18) : null, e.wert, e.einheit ? h("small", null, e.einheit) : null),
-      e.befund ? h("span", { class: "befund-kurz" }, e.befund.kurz) : null,
+      e.befund ? h("span", { class: `befund-kurz stufe-${e.befund.stufe || "hinweis"}` }, e.befund.kurz) : null,
       e.neben ? h("span", { class: "neben" }, e.neben) : null)));
 }
 /** Körperwerte wie in der Withings-App: links Name und Einordnung, rechts Wert mit einem Balken aus drei Bereichen */
@@ -774,21 +855,23 @@ function markerListe(eintraege) {
     // Zahl und Einheit nicht trennen („30 Tagen“, „1,7 kg“)
     const neben = e.neben ? h("span", { class: "marker-neben" }, e.neben.replace(/(\d) (?=Tagen|kg|%|Jahre|Punkte|cm)/g, "$1\u00a0")) : null;
     if (!e.zone) return h("li", { class: "marker" }, h("div", { class: "marker-text" }, h("span", { class: "marker-name" }, e.name), neben), h("div", { class: "marker-rechts" }, wert));
-    const i = zoneIndex(e.zone, e.zahl);
-    const stufe = e.zone.stufen[i][0];
+    const v = Math.round(e.zahl * 10 ** e.stellen) / 10 ** e.stellen; // eingeordnet wird der angezeigte Wert
+    const i = zoneIndex(e.zone, v);
+    const stufe = (e.zone.wort && e.zone.wort(v)) || e.zone.stufen[i][0];
     const texte = zoneTexte(e.zone, e.stellen);
-    // Bezugsbereich wie „Referenzwerte“ bei Withings: der gute Bereich (beim Grundumsatz der Durchschnitt)
+    // Bezugsbereich mit Quelle: der gute Bereich, dahinter, woher die Einteilung stammt
     const gutJ = e.zone.stufen.findIndex(([, art]) => art === "gut");
     const j = gutJ >= 0 ? gutJ : 1;
-    const bezug = `${e.zone.stufen[j][0]} ${texte[j]}${e.einheit ? ` ${e.einheit}` : ""}`;
+    const bezug = `${e.zone.stufen[j][0]} ${texte[j]}${e.einheit ? ` ${e.einheit}` : ""} (${e.zone.quelle})`;
     const bereiche = e.zone.stufen.map(([n], k) => `${n}${texte[k] ? ` ${texte[k]}` : ""}`).join(", ");
     return h("li", { class: "marker" },
       h("div", { class: "marker-text" }, h("span", { class: "marker-name" }, e.name), h("b", { class: "marker-stufe" }, stufe),
         h("span", { class: "marker-bezug" }, bezug), neben),
       h("div", { class: "marker-rechts" }, wert,
-        h("div", { class: "marker-skala", role: "img", "aria-label": `${e.name} ${e.wert}${e.einheit ? ` ${e.einheit}` : ""}: ${stufe}. Bereiche: ${bereiche}.` },
+        h("div", { class: "marker-skala", role: "img", style: { gridTemplateColumns: `repeat(${e.zone.stufen.length}, 1fr)` },
+          "aria-label": `${e.name} ${e.wert}${e.einheit ? ` ${e.einheit}` : ""}: ${stufe}. Bereiche ${e.zone.quelle}: ${bereiche}.` },
           e.zone.stufen.map(([, art], k) => h("span", { class: k === i ? `an ${art}` : null })),
-          h("i", { class: "zeiger", style: { left: `${zonePosition(e.zone, e.zahl) * 100}%` } }))));
+          h("i", { class: "zeiger", style: { left: `${zonePosition(e.zone, v) * 100}%` } }))));
   });
   return zeilen.length ? h("ul", { class: "marker-liste" }, zeilen) : null;
 }
@@ -929,22 +1012,53 @@ const TIPPS = {
     "Harte Einheiten nicht direkt hintereinander legen.",
   ],
 };
+// Worauf die Einordnungen beruhen: zuerst ärztliche Leitlinien und Studien, dann Herstellerangaben (nur wo es keine ärztliche Norm gibt)
 const QUELLEN = [
-  ["Blutdruck: Deutsche Hochdruckliga – Mittelwert der Selbstmessung unter 135/85 mmHg; Einteilung „optimal unter 120/80“ nach der Europäischen Hochdruckgesellschaft (ESH)", "https://www.hochdruckliga.de/fileadmin/downloads/stellungnahmen/DHL-Stellungnahme-Zielblutdruck.pdf"],
-  ["Ruhepuls: Zhang und Kollegen, CMAJ 2016 – Ruhepuls und Sterblichkeit", "https://www.eurekalert.org/news-releases/558883"],
-  ["QTc-Zeit: Normal unter 450 ms (Männer) bzw. 460 ms (Frauen), über 500 ms deutlich erhöht", "https://gpnotebook.com/pages/diabetes-and-endocrinology/qt-interval-prolonged"],
-  ["Gefäße: Reference Values for Arterial Stiffness' Collaboration, European Heart Journal 2010 (Pulswellengeschwindigkeit nach Alter)", "https://pmc.ncbi.nlm.nih.gov/articles/PMC2948201"],
-  ["Körper: Normalbereiche von Withings für Fett-, Muskel-, Wasser- und Knochenanteil", "https://program-support.withings.com/hc/en-us/articles/47487277619601-Body-Pro-2-What-are-the-normal-ranges-for-body-composition"],
-  ["Viszeralfett: Withings – Index 0 bis 5 normal, ab 5,1 hoch", "https://support.withings.com/hc/articles/11072390984081"],
-  ["Nervengesundheit: Withings – Wert über 50 normal, darunter niedrig", "https://support.withings.com/hc/en-us/articles/11888924491025-Body-Scan-Nerve-Health-Score-NHS"],
-  ["BMI: Einteilung der Weltgesundheitsorganisation (WHO), Normalgewicht 18,5 bis 24,9", null],
-  ["Schlaf: National Sleep Foundation – 7 bis 9 Stunden für Erwachsene, 7 bis 8 Stunden ab 65", "https://www.eurekalert.org/news-releases/554948"],
-  ["Schlafscore: Garmin – ab 80 gut, ab 90 ausgezeichnet", "https://www.garmin.com/en-CA/blog/?p=30765"],
-  ["Stress: Garmin – 0–25 Ruhe, 26–50 niedrig, 51–75 mittel, 76–100 hoch", "https://www8.garmin.com/manuals/webhelp/vivosmart4/EN-US/GUID-9282196F-D969-404D-B678-F48A13D8D0CB.html"],
-  ["HRV-Status: Garmin – ausgeglichen, unausgeglichen, niedrig, schlecht", "https://www.garmin.com/en-PH/blog/fitness/understanding-the-hrv-status-on-your-garmin-smartwatch/"],
-  ["Bewegung: WHO-Leitlinie 2020 – 150 bis 300 Minuten mäßige Bewegung pro Woche", null],
+  ["Blutdruck: Leitlinie der Europäischen Hochdruckgesellschaft (ESH 2023), Deutsche Hochdruckliga – Mittel der Selbstmessung ab 135/85 mmHg = Bluthochdruck, optimal unter 120/80", "https://www.hochdruckliga.de/fileadmin/downloads/stellungnahmen/DHL-Stellungnahme-Zielblutdruck.pdf"],
+  ["Ruhepuls: Normalbereich 60–100/min; ab 80/min höheres Herz-Kreislauf-Risiko laut Zhang und Kollegen, CMAJ 2016", "https://doi.org/10.1503/cmaj.150535"],
+  ["QTc-Zeit: Empfehlung von AHA, ACCF und HRS 2009 – verlängert über 450 ms (Männer) bzw. 460 ms (Frauen), über 500 ms deutlich", "https://doi.org/10.1161/CIRCULATIONAHA.108.191096"],
+  ["Pulswellengeschwindigkeit: Reference Values for Arterial Stiffness' Collaboration, European Heart Journal 2010 (Normalwerte nach Alter)", "https://doi.org/10.1093/eurheartj/ehq165"],
+  ["BMI: Einteilung der WHO – Normalgewicht 18,5–24,9, Übergewicht 25–29,9, Adipositas ab 30 (Grad I bis III)", "https://www.who.int/news-room/fact-sheets/detail/obesity-and-overweight"],
+  ["Körperfettanteil: Gallagher und Kollegen, American Journal of Clinical Nutrition 2000 – Normalbereiche nach Alter und Geschlecht, abgeleitet aus den BMI-Grenzen der WHO", "https://doi.org/10.1093/ajcn/72.3.694"],
+  ["Muskeln an Armen und Beinen: Europäische Sarkopenie-Leitlinie EWGSOP2, Age and Ageing 2019 – niedrig unter 5,5 kg/m² (Frauen) bzw. 7,0 kg/m² (Männer)", "https://doi.org/10.1093/ageing/afy169"],
+  ["Magermasse: ESPEN-Konsens zur Mangelernährung, Clinical Nutrition 2015 – vermindert unter 15 kg/m² (Frauen) bzw. 17 kg/m² (Männer)", "https://doi.org/10.1016/j.clnu.2015.03.001"],
+  ["Grundumsatz: erwarteter Wert nach Mifflin und St Jeor, American Journal of Clinical Nutrition 1990", "https://doi.org/10.1093/ajcn/51.2.241"],
+  ["Bauchumfang: Expertenbericht der WHO – erhöhtes Risiko ab 80 cm (Frauen) bzw. 94 cm (Männer)", "https://www.who.int/publications/i/item/9789241501491"],
+  ["Schlafdauer: National Sleep Foundation 2015 – 7 bis 9 Stunden für Erwachsene, 7 bis 8 ab 65", "https://doi.org/10.1016/j.sleh.2014.12.010"],
+  ["Sauerstoffsättigung: Leitlinie der British Thoracic Society 2017 – Normalbereich 94–98 %, wach unter 70 Jahren meist 96–98 %", "https://doi.org/10.1136/thoraxjnl-2016-209729"],
+  ["Bewegung: WHO-Leitlinie 2020 – 150 bis 300 Minuten mäßige Bewegung pro Woche", "https://www.who.int/publications/i/item/9789240015128"],
   ["Schritte: Ding und Kollegen, Lancet Public Health 2025 – deutlicher Nutzen ab etwa 7.000 Schritten am Tag", "https://epocrates.com/online/article/7-000-daily-steps-associated-with-substantial-reductions-in-mortality-and"],
+  ["Viszeralfett: Withings – Index bis 5 gut, bis 10 hoch, darüber sehr hoch", "https://support.withings.com/hc/articles/11072390984081", "hersteller"],
+  ["Nervengesundheit: Withings – Wert über 50 normal, darunter niedrig", "https://support.withings.com/hc/en-us/articles/11888924491025-Body-Scan-Nerve-Health-Score-NHS", "hersteller"],
+  ["Schlafscore: Garmin – ab 80 gut, ab 90 ausgezeichnet", "https://www.garmin.com/en-CA/blog/?p=30765", "hersteller"],
+  ["Stress: Garmin – 0–25 Ruhe, 26–50 niedrig, 51–75 mittel, 76–100 hoch", "https://www8.garmin.com/manuals/webhelp/vivosmart4/EN-US/GUID-9282196F-D969-404D-B678-F48A13D8D0CB.html", "hersteller"],
+  ["HRV-Status, Fitnessalter und Trainingsstatus: Garmin", "https://www.garmin.com/en-PH/blog/fitness/understanding-the-hrv-status-on-your-garmin-smartwatch/", "hersteller"],
 ];
+// Grundlage jedes Hinweises – steht unter dem Hinweis, damit klar ist, woher die Einordnung kommt
+const GRUNDLAGE = {
+  blutdruck: "Leitlinie der Europäischen Hochdruckgesellschaft (ESH 2023), Deutsche Hochdruckliga",
+  blutdruck_einzel: "Leitlinie der Europäischen Hochdruckgesellschaft (ESH 2023), Deutsche Hochdruckliga",
+  ruhepuls: "Normalbereich 60–100/min; höheres Risiko ab 80/min laut Zhang und Kollegen (CMAJ 2016)",
+  hrv: "Einschätzung von Garmin – dafür gibt es keine ärztliche Norm",
+  pwv: "Normalwerte nach Alter der Reference Values for Arterial Stiffness' Collaboration (European Heart Journal 2010)",
+  ekg: "Auswertung des EKG-Geräts (Withings oder Garmin, als Medizinprodukt zugelassen) – sie ersetzt keine ärztliche Befundung",
+  qtc: "Empfehlung von AHA, ACCF und HRS (2009)",
+  bmi: "Einteilung der Weltgesundheitsorganisation (WHO)",
+  fett: "Referenzwerte von Gallagher und Kollegen (American Journal of Clinical Nutrition 2000)",
+  muskel: "Europäische Sarkopenie-Leitlinie EWGSOP2 (2019)",
+  mager: "ESPEN-Konsens zur Mangelernährung (2015)",
+  viszeral: "Einteilung von Withings – dafür gibt es keine ärztliche Norm",
+  nerven: "Einteilung von Withings für die Nervenmessung der Body Scan",
+  schlafdauer: "Empfehlung der National Sleep Foundation (2015)",
+  schlafscore: "Einschätzung von Garmin – dafür gibt es keine ärztliche Norm",
+  spo2: "Leitlinie der British Thoracic Society (2017)",
+  atmung: "Normalbereich der Atemfrequenz in Ruhe (12–20 pro Minute)",
+  stress: "Einschätzung von Garmin – dafür gibt es keine ärztliche Norm",
+  schritte: "Studienauswertung von Ding und Kollegen (Lancet Public Health 2025)",
+  intensitaet: "Bewegungsempfehlung der WHO (2020)",
+  fitnessalter: "Einschätzung von Garmin – dafür gibt es keine ärztliche Norm",
+  trainingsstatus: "Einschätzung von Garmin – dafür gibt es keine ärztliche Norm",
+};
 // Normalbereiche von Withings (Anteil am Körpergewicht in %), nach Geschlecht und Alter [bis Alter, von, bis]
 const W_BEREICHE = {
   fett: { w: [[39, 22, 33], [59, 24, 34], [999, 25, 36]], m: [[39, 8, 20], [59, 11, 22], [999, 13, 25]] },
@@ -957,59 +1071,76 @@ function wBereich(art, p) {
   if (!t || (p.alter == null && t.length > 1)) return null;
   return (t.find(([bis]) => (p.alter ?? 0) <= bis) || t[t.length - 1]).slice(1);
 }
-// Bereiche wie in der Withings-App (Body Scan). Für Magermasse, Muskeln, Wasser und Knochen nennt die App eine
-// Untergrenze, die mit der Körpergröße wächst: so viele kg je m² Größe zum Quadrat (abgeglichen mit den Werten,
-// die die Withings-App für eine Frau mit 164 cm anzeigt: Magermasse ab 41,7 kg, Wasser ab 27,7 kg, Knochen ab
-// 2,1 kg). Die Grenze zu „Hoch“ bzw. „Gut“ (das 1,25-Fache) ist geschätzt; Withings färbt beides grün.
-const W_APP_UNTERGRENZE = { w: { mager: 15.5, wasser: 10.3, knochen: 0.78 }, m: { mager: 18, wasser: 11.96, knochen: 0.91 } };
-/** Bereiche je Körperwert: grenzen [a, b], drei Stufen [Name, Art], dazu wohin die Grenzen gehören */
+// ---- Körperwerte ärztlich einordnen
+// Bewertet wird nur, wofür es eine ärztliche Norm gibt:
+//   BMI nach der WHO; Körperfettanteil nach Gallagher et al. (Am J Clin Nutr 2000), nach Alter und Geschlecht;
+//   fettfreie Masse nach ESPEN 2015 (Index unter 15 bzw. 17 kg/m² = vermindert, Kriterium für Mangelernährung);
+//   Muskeln an Armen und Beinen nach der europäischen Sarkopenie-Leitlinie EWGSOP2 2019 (unter 5,5 bzw. 7,0 kg/m²).
+// Das Viszeralfett ist ein Index von Withings ohne ärztliche Norm (ärztlich zählt der Bauchumfang); es behält die
+// Einteilung von Withings und ist so gekennzeichnet. Gesamtmuskelmasse, Wasser, Knochen, Grundumsatz und
+// Stoffwechselalter haben für Waagen keine ärztliche Norm und bleiben ohne Bewertung.
+// Körperfett nach Gallagher (Frauen/Männer): [bis Alter, niedrig unter, erhöht ab, stark erhöht ab]
+const FETT_NORM = { w: [[39, 21, 33, 39], [59, 23, 34, 40], [999, 24, 36, 42]], m: [[39, 8, 20, 25], [59, 11, 22, 28], [999, 13, 25, 30]] };
+const FFMI_GRENZE = { w: 15, m: 17 };
+const ASMI_GRENZE = { w: 5.5, m: 7 };
+function fettNorm(p) {
+  const t = FETT_NORM[p.geschlecht];
+  if (!t || p.alter == null) return null;
+  const [bis, ...grenzen] = t.find(([b]) => p.alter <= b) || t[t.length - 1];
+  return { grenzen, gruppe: bis === 39 ? "bis 39 Jahre" : bis === 59 ? "40 bis 59 Jahre" : "ab 60 Jahren" };
+}
+/** Bereiche je Körperwert: grenzen (aufsteigend), Stufen [Name, Art]; Art gut, warn, ernst oder neutral */
 function koerperZonen(p) {
   const wer = p.geschlecht === "w" ? "Frauen" : p.geschlecht === "m" ? "Männer" : null;
   const z = {
-    bmi: { grenzen: [18.5, 25], stufen: [["Niedrig", "warn"], ["Gut", "gut"], ["Hoch", "warn"]], mitteText: "18,5–24,9", quelle: "Einteilung der WHO" },
-    viszeral: { grenzen: [5, 10], aZuErster: true, bZuMitte: true, stufen: [["Gut", "gut"], ["Hoch", "warn"], ["Sehr hoch", "warn"]], quelle: "Einteilung von Withings" },
+    bmi: { grenzen: [18.5, 25, 30], schritt: 0.1, stufen: [["Untergewicht", "warn"], ["Normalgewicht", "gut"], ["Übergewicht", "warn"], ["Adipositas", "ernst"]],
+      wort: (v) => (v >= 30 ? `Adipositas Grad ${v >= 40 ? "III" : v >= 35 ? "II" : "I"}` : null), quelle: "WHO" },
+    viszeral: { grenzen: [5, 10], bisInklusiv: true, stufen: [["Gut", "gut"], ["Hoch", "warn"], ["Sehr hoch", "warn"]], quelle: "laut Withings", hersteller: true },
   };
-  const fett = wBereich("fett", p);
-  if (fett) z.fett = { grenzen: fett, bZuMitte: true, stufen: [["Niedrig", "warn"], ["Normal", "gut"], ["Hoch", "warn"]],
-    quelle: `Normalbereich von Withings für ${wer}${W_BEREICHE.fett[p.geschlecht].length > 1 ? " deines Alters" : ""}` };
-  const ug = W_APP_UNTERGRENZE[p.geschlecht];
-  if (ug && p.groesse) {
+  const f = fettNorm(p);
+  if (f) z.fett = { grenzen: f.grenzen, schritt: 0.1, stufen: [["Niedrig", "warn"], ["Normal", "gut"], ["Erhöht", "warn"], ["Stark erhöht", "ernst"]],
+    quelle: "Gallagher 2000", gruppe: `${wer} ${f.gruppe}` };
+  if (FFMI_GRENZE[p.geschlecht] && p.groesse) {
     const h2 = p.groesse * p.groesse;
-    const gross = `für ${wer} mit ${zahl(p.groesse * 100)} cm`;
-    const mehr = (u, oben) => ({ grenzen: [u, u * 1.25], obenGeschaetzt: true, stufen: [["Niedrig", "warn"], ["Normal", "gut"], [oben, "gut"]], quelle: `Untergrenze wie in der Withings-App ${gross}` });
-    z.mager = mehr(ug.mager * h2, "Hoch");
-    z.muskel = mehr((ug.mager - ug.knochen) * h2, "Hoch");
-    z.wasser = mehr(ug.wasser * h2, "Gut");
-    z.knochen = mehr(ug.knochen * h2, "Gut");
+    const kg = (x) => Math.round(x * 10) / 10; // wie angezeigt
+    z.mager = { grenzen: [kg(FFMI_GRENZE[p.geschlecht] * h2)], stufen: [["Vermindert", "warn"], ["Normal", "gut"]], index: FFMI_GRENZE[p.geschlecht], quelle: "ESPEN" };
+    z.asm = { grenzen: [kg(ASMI_GRENZE[p.geschlecht] * h2)], stufen: [["Niedrig", "warn"], ["Normal", "gut"]], index: ASMI_GRENZE[p.geschlecht], quelle: "EWGSOP2" };
   }
   return z;
 }
-/** Grundumsatz: verglichen mit dem aus der Magermasse berechneten (Katch-McArdle), ±20 % gelten als Durchschnitt */
-function grundumsatzZone(mager) {
-  if (!zahlOk(mager)) return null;
-  const soll = 370 + 21.6 * mager;
-  return { grenzen: [Math.round(soll * 0.8), Math.round(soll * 1.2)], bZuMitte: true, stufen: [["Niedrig", "neutral"], ["Durchschnitt", "neutral"], ["Hoch", "neutral"]],
-    quelle: "verglichen mit dem Grundumsatz, den deine Magermasse erwarten lässt" };
+/** Grundumsatz, den die Formel von Mifflin und St Jeor (Ernährungsmedizin) für Gewicht, Größe, Alter und Geschlecht erwarten lässt */
+function grundumsatzErwartet(p, gewicht) {
+  if (!p.groesse || p.alter == null || !p.geschlecht || !zahlOk(gewicht)) return null;
+  return 10 * gewicht + 625 * p.groesse - 5 * p.alter + (p.geschlecht === "m" ? 5 : -161);
+}
+/** Muskeln an Armen und Beinen (Body Scan, je Körperbereich): Summe der letzten Messung */
+function gliedmassenMuskeln(w) {
+  const teile = [2, 3, 10, 11].map((pos) => letzter(wReihe(w, 175, pos)));
+  if (!teile.every(Boolean)) return null;
+  return { kg: teile.reduce((s, x) => s + x[1], 0), ts: Math.max(...teile.map((x) => x[0])) };
 }
 function zoneIndex(z, v) {
-  const [a, b] = z.grenzen;
-  if (z.aZuErster ? v <= a : v < a) return 0;
-  return (z.bZuMitte ? v <= b : v < b) ? 1 : 2;
+  for (let i = 0; i < z.grenzen.length; i++) if (z.bisInklusiv ? v <= z.grenzen[i] : v < z.grenzen[i]) return i;
+  return z.grenzen.length;
 }
-/** Beschriftung der drei Bereiche, zum Beispiel „unter 18,5“, „18,5–24,9“, „ab 25“ */
+/** Beschriftung der Bereiche, zum Beispiel „unter 18,5“, „18,5–24,9“, „ab 30“ */
 function zoneTexte(z, stellen) {
   const f = (x) => zahl(x, Number.isInteger(x) && stellen > 0 ? 0 : stellen);
-  const [a, b] = z.grenzen;
-  return [z.aZuErster ? `bis ${f(a)}` : `unter ${f(a)}`, z.mitteText || (z.obenGeschaetzt ? `ab ${f(a)}` : `${f(a)}–${f(b)}`),
-    z.obenGeschaetzt ? "" : z.bZuMitte ? `über ${f(b)}` : `ab ${f(b)}`];
+  const g = z.grenzen, n = g.length;
+  const bis = (x) => f(z.schritt ? Math.round((x - z.schritt) * 10) / 10 : x);
+  return z.stufen.map((_, i) => {
+    if (i === 0) return z.bisInklusiv ? `bis ${f(g[0])}` : `unter ${f(g[0])}`;
+    if (i === n) return z.bisInklusiv ? `über ${f(g[n - 1])}` : `ab ${f(g[n - 1])}`;
+    return z.bisInklusiv ? `bis ${f(g[i])}` : `${f(g[i - 1])}–${bis(g[i])}`;
+  });
 }
-/** Lage des Werts auf dem Balken (0 bis 1): jeder Bereich ein Drittel, offene Ränder so breit wie die Mitte */
+/** Lage des Werts auf dem Balken (0 bis 1): jeder Bereich gleich breit, offene Ränder so breit wie ein innerer Bereich */
 function zonePosition(z, v) {
-  const [a, b] = z.grenzen;
-  const i = zoneIndex(z, v);
-  const breite = b - a;
-  const [lo, hi] = [[a - breite, a], [a, b], [b, b + breite]][i];
-  return (i + Math.min(0.94, Math.max(0.06, (v - lo) / (hi - lo)))) / 3;
+  const g = z.grenzen, n = g.length + 1, i = zoneIndex(z, v);
+  const breite = g.length > 1 ? (g[g.length - 1] - g[0]) / (g.length - 1) : Math.abs(g[0]) * 0.25 || 1;
+  const lo = i === 0 ? g[0] - breite : g[i - 1];
+  const hi = i === g.length ? g[g.length - 1] + breite : g[i];
+  return (i + Math.min(0.94, Math.max(0.06, (v - lo) / (hi - lo)))) / n;
 }
 
 // Pulswellengeschwindigkeit: 90. Perzentil der Normalwerte nach Alter (m/s)
@@ -1070,6 +1201,8 @@ async function befundeBerechnen() {
     "im_mod", "im_int", "fitnessalter", "hrv_woche", "hrv_unten", "hrv_oben"], isoMinus(30));
   const werteAb = (r, von, bisOhne = null) => r.filter((x) => x[0] >= von && (!bisOhne || x[0] < bisOhne)).map((x) => x[1]).filter(Number.isFinite);
   const mittel7 = (r, mindestens = 3) => { const v = werteAb(r, isoMinus(6)); return v.length >= mindestens ? mittel(v) : null; };
+  // Eingeordnet wird der Wert, der auch angezeigt wird – sonst stünde etwa „94 %“ da und gälte trotzdem als „unter 94 %“
+  const rund = (v, stellen = 0) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10 ** stellen) / 10 ** stellen);
   const tage = 86400000;
 
   // ---- Blutdruck: Mittel der Selbstmessung
@@ -1084,7 +1217,7 @@ async function befundeBerechnen() {
   const bpBasis = bp7.length >= 3 ? [bp7, "der letzten 7 Tage"] : bp14.length >= 3 ? [bp14, "der letzten 14 Tage"] : null;
   if (bpBasis) {
     const [l, zr] = bpBasis;
-    const sys = mittel(l.map((m) => m.sys)), dia = mittel(l.map((m) => m.dia));
+    const sys = rund(mittel(l.map((m) => m.sys))), dia = rund(mittel(l.map((m) => m.dia)));
     const wert = `${zahl(sys)}/${zahl(dia)} mmHg`, bezug = `Mittel ${zr} aus ${l.length} Messungen`;
     if (sys >= 135 || dia >= 85) neu({ id: "blutdruck", bereich: "herz", stufe: "kritisch", name: "Blutdruck", link: "#herz",
       titel: "Blutdruck über dem Grenzwert", wert, bezug, kurz: "Über 135/85", ziel: "unter 120/80 mmHg",
@@ -1098,13 +1231,13 @@ async function befundeBerechnen() {
   }
 
   // ---- Ruhepuls (Uhr)
-  const rp = mittel7(k.ruhepuls);
+  const rp = rund(mittel7(k.ruhepuls));
   if (rp != null) {
     const wert = `${zahl(rp)} bpm`, bezug = "Mittel der letzten 7 Tage";
     if (rp >= 100) neu({ id: "ruhepuls", bereich: "herz", stufe: "kritisch", name: "Ruhepuls", link: "#herz", titel: "Ruhepuls sehr hoch", wert, bezug,
       kurz: "Über 100 bpm", ziel: "unter 80 bpm", text: "Ein Ruhepuls über 100 Schlägen pro Minute ist zu hoch.",
       arzt: "Bitte ärztlich abklären lassen, vor allem bei Herzstolpern, Schwindel oder Atemnot.", tipps: TIPPS.ruhepuls });
-    else if (rp >= 80) neu({ id: "ruhepuls", bereich: "herz", name: "Ruhepuls", link: "#herz", titel: "Ruhepuls erhöht", wert, bezug,
+    else if (rp >= 80) neu({ id: "ruhepuls", bereich: "herz", name: "Ruhepuls", link: "#herz", titel: "Ruhepuls im oberen Normalbereich", wert, bezug,
       kurz: "Günstig unter 80", ziel: "unter 80 bpm",
       text: "Normal sind 60 bis 100 Schläge pro Minute. In großen Studien ging ein Ruhepuls über 80 aber mit einem höheren Herz-Kreislauf-Risiko einher.",
       tipps: TIPPS.ruhepuls });
@@ -1138,7 +1271,7 @@ async function befundeBerechnen() {
     if (p.alter == null) fehlt.push("Pulswellengeschwindigkeit: Für den Vergleich mit Gleichaltrigen fehlt dein Alter im Garmin-Profil.");
     else {
       const grenze = PWV_GRENZE.find(([bis]) => p.alter <= bis)[1];
-      const v = mittel(pwv.slice(-3).map((x) => x[1]));
+      const v = rund(mittel(pwv.slice(-3).map((x) => x[1])), 1);
       const wert = `${zahl(v, 1)} m/s`;
       if (v > grenze) neu({ id: "pwv", bereich: "herz", name: "Pulswellengeschwindigkeit", link: "#herz", titel: "Gefäße steifer als üblich", wert,
         bezug: `Mittel der letzten ${Math.min(3, pwv.length)} Messungen`, kurz: `Üblich bis ${zahl(grenze, 1)} m/s`, ziel: `bis ${zahl(grenze, 1)} m/s`,
@@ -1147,15 +1280,7 @@ async function befundeBerechnen() {
       else gut("pwv", "herz", "Pulswellengeschwindigkeit", wert, `bis ${zahl(grenze, 1)} m/s`, "#herz");
     }
   }
-  const gefR = (wReihe(w, 155).length ? wReihe(w, 155) : wReihe(w, 140)).filter((x) => x[0] >= Date.now() - 30 * tage);
-  if (gefR.length && p.alter != null) {
-    const v = mittel(gefR.slice(-3).map((x) => x[1]));
-    if (v > p.alter + 3) neu({ id: "gefaessalter", bereich: "herz", name: "Gefäßalter", link: "#herz", titel: "Gefäßalter über deinem Lebensalter",
-      wert: `${zahl(v)} Jahre`, bezug: `Lebensalter ${p.alter} Jahre`, kurz: `Lebensalter ${p.alter}`, ziel: `höchstens ${p.alter} Jahre`,
-      text: "Die Body Scan schätzt das Gefäßalter aus der Pulswellengeschwindigkeit. Ein höheres Gefäßalter heißt: Die Gefäße sind steifer, als es für dein Alter üblich ist.",
-      tipps: TIPPS.gefaesse });
-    else gut("gefaessalter", "herz", "Gefäßalter", `${zahl(v)} Jahre`, `bis ${p.alter + 3} Jahre`, "#herz");
-  }
+  // Das Gefäßalter schätzt Withings aus der Pulswellengeschwindigkeit; ärztlich zählt die Geschwindigkeit selbst (oben).
   const ekgNeu = ekgListe.filter((e) => e.ts && Date.now() - e.ts * 1000 < 90 * tage).sort((a, b) => b.ts - a.ts)[0];
   if (ekgNeu) {
     const kl = ekgKlasse(ekgNeu);
@@ -1174,10 +1299,10 @@ async function befundeBerechnen() {
   if (qtc && Date.now() - qtc[0] < 90 * tage) {
     const grenze = p.geschlecht === "m" ? 450 : 460;
     const wert = `${zahl(qtc[1])} ms`, bezug = `EKG vom ${datum(isoAusMs(qtc[0]), "kurz")}`;
-    if (qtc[1] > 500) neu({ id: "qtc", bereich: "herz", stufe: "kritisch", name: "QTc-Zeit", link: "#herz", titel: "QTc-Zeit deutlich verlängert", wert, bezug,
+    if (Math.round(qtc[1]) > 500) neu({ id: "qtc", bereich: "herz", stufe: "kritisch", name: "QTc-Zeit", link: "#herz", titel: "QTc-Zeit deutlich verlängert", wert, bezug,
       kurz: `Normal unter ${grenze} ms`, ziel: `unter ${grenze} ms`, text: "Eine QTc-Zeit über 500 ms erhöht das Risiko für Herzrhythmusstörungen.",
       arzt: "Bitte zeitnah ärztlich abklären – besonders, wenn du Medikamente nimmst, denn manche verlängern die QT-Zeit." });
-    else if (qtc[1] > grenze) neu({ id: "qtc", bereich: "herz", name: "QTc-Zeit", link: "#herz", titel: "QTc-Zeit verlängert", wert, bezug,
+    else if (Math.round(qtc[1]) > grenze) neu({ id: "qtc", bereich: "herz", name: "QTc-Zeit", link: "#herz", titel: "QTc-Zeit verlängert", wert, bezug,
       kurz: `Normal unter ${grenze} ms`, ziel: `unter ${grenze} ms`, text: `Normal ist eine QTc-Zeit unter ${grenze} ms. Einzelne Messungen schwanken, wiederhole das EKG in Ruhe.`,
       arzt: "Sprich den Wert beim nächsten Arzttermin an, vor allem wenn du Medikamente nimmst." });
     else gut("qtc", "herz", "QTc-Zeit", wert, `unter ${grenze} ms`, "#herz");
@@ -1186,7 +1311,7 @@ async function befundeBerechnen() {
   // ---- Körper: BMI und Zusammensetzung (Withings)
   const gew = wLetzte(w, 1);
   if (gew && p.groesse && Date.now() - gew[0] < 60 * tage) {
-    const bmi = gew[1] / (p.groesse * p.groesse);
+    const bmi = rund(gew[1] / (p.groesse * p.groesse), 1);
     const wert = zahl(bmi, 1), bezug = `${zahl(gew[1], 1)} kg bei ${zahl(p.groesse * 100)} cm`;
     if (bmi >= 25) neu({ id: "bmi", bereich: "koerper", name: "BMI", link: "#koerper", titel: bmi >= 30 ? "BMI im Bereich Adipositas" : "BMI über dem Normalbereich",
       wert, bezug, kurz: `BMI ${wert}, normal bis 24,9`, ziel: "18,5–24,9",
@@ -1201,56 +1326,62 @@ async function befundeBerechnen() {
   if (letzteZus && Date.now() - letzteZus[0] < 90 * tage) {
     const g = wGruppe(w, letzteZus[2]);
     const bezug = `Messung vom ${datum(isoAusMs(letzteZus[0]), "kurz")}`;
-    const ohneProfil = [];
-    const pruefen = ({ id, art, name, wert, tippsHoch, tippsNiedrig, nurNiedrig = false, nurHoch = false, extra = "" }) => {
-      if (wert == null) return;
-      const ber = wBereich(art, p);
-      if (!ber) { ohneProfil.push(name); return; }
-      const [a, b] = ber;
-      const gruppe = p.geschlecht === "w" ? "Frauen" : "Männer";
-      const alterText = W_BEREICHE[art][p.geschlecht].length > 1 ? ` deines Alters` : "";
-      const w_ = `${zahl(wert, 1)} %`, ziel = spanne(a, b, "%");
-      if (!nurNiedrig && wert > b) neu({ id, bereich: "koerper", name, link: "#koerper", titel: `${name} über dem Normalbereich`, wert: w_, bezug,
-        kurz: `Normal ${ziel}`, ziel, text: `Withings nennt für ${gruppe}${alterText} einen Normalbereich von ${ziel}.${extra}`, tipps: tippsHoch });
-      else if (!nurHoch && wert < a) neu({ id, bereich: "koerper", name, link: "#koerper", titel: `${name} unter dem Normalbereich`, wert: w_, bezug,
-        kurz: `Normal ${ziel}`, ziel, text: `Withings nennt für ${gruppe}${alterText} einen Normalbereich von ${ziel}.${extra}`, tipps: tippsNiedrig });
-      else gut(id, "koerper", name, w_, ziel, "#koerper");
-    };
-    pruefen({ id: "fett", art: "fett", name: "Körperfettanteil", wert: g[6], tippsHoch: TIPPS.abnehmen, tippsNiedrig: TIPPS.zunehmen });
-    // Muskeln, Wasser und Knochen wie in der Withings-App: in kg, Untergrenze nach Körpergröße
     const zonen = koerperZonen(p);
-    const ohneGroesse = [];
-    const untergrenze = ({ id, name, typ, zone, tipps, extra = "" }) => {
-      const v = g[typ];
-      if (v == null) return;
-      if (!zone) { ohneGroesse.push(name); return; }
-      const a = zone.grenzen[0];
-      const w_ = `${zahl(v, 1)} kg`, ziel = `ab ${zahl(a, 1)} kg`;
-      if (v < a) neu({ id, bereich: "koerper", name, link: "#koerper", titel: `${name} unter dem Normalbereich`, wert: w_, bezug, kurz: `Normal ${ziel}`, ziel,
-        text: `Die Withings-App nennt für ${p.geschlecht === "w" ? "Frauen" : "Männer"} mit ${zahl(p.groesse * 100)} cm einen Normalbereich ${ziel}.${extra}`, tipps });
-      else gut(id, "koerper", name, w_, ziel, "#koerper");
-    };
-    untergrenze({ id: "muskel", name: "Muskelmasse", typ: 76, zone: zonen.muskel, tipps: TIPPS.muskel });
-    untergrenze({ id: "wasser", name: "Körperwasser", typ: 77, zone: zonen.wasser, tipps: TIPPS.wasser });
-    untergrenze({ id: "knochen", name: "Knochenmasse", typ: 88, zone: zonen.knochen, tipps: TIPPS.knochen, extra: " Die Waage schätzt diesen Wert nur." });
-    if (ohneProfil.length || ohneGroesse.length) {
-      const fehlend = [p.geschlecht ? null : "Geschlecht", ohneProfil.length && p.alter == null ? "Alter" : null, ohneGroesse.length && !p.groesse ? "Größe" : null].filter(Boolean);
-      fehlt.push(`${[...ohneProfil, ...ohneGroesse].join(", ")}: Für die Normalbereiche ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`);
+    const ohneProfil = [];
+    const wer = p.geschlecht === "w" ? "Frauen" : "Männer";
+    // Körperfettanteil nach Gallagher und Kollegen (2000), abgeleitet aus den BMI-Grenzen der WHO
+    if (g[6] != null) {
+      if (!zonen.fett) ohneProfil.push(["Körperfettanteil", "Geschlecht und Alter"]);
+      else {
+        const [niedrig, hoch, sehr] = zonen.fett.grenzen;
+        const i = zoneIndex(zonen.fett, rund(g[6], 1));
+        const w_ = `${zahl(g[6], 1)} %`, ziel = `${zahl(niedrig)}–${zahl(hoch - 0.1, 1)} %`;
+        const text = `Nach den Referenzwerten von Gallagher und Kollegen, die aus den BMI-Grenzen der WHO abgeleitet sind, ist für ${zonen.fett.gruppe} ein Körperfettanteil von ${ziel} normal; ab ${zahl(hoch)} % gilt er als erhöht, ab ${zahl(sehr)} % entspricht er dem Bereich der Adipositas. Die Waage schätzt den Wert über den elektrischen Widerstand des Körpers.`;
+        if (i >= 2) neu({ id: "fett", bereich: "koerper", name: "Körperfettanteil", link: "#koerper", titel: i === 3 ? "Körperfettanteil stark erhöht" : "Körperfettanteil erhöht",
+          wert: w_, bezug, kurz: `Normal ${ziel}`, ziel, text, tipps: TIPPS.abnehmen });
+        else if (i === 0) neu({ id: "fett", bereich: "koerper", name: "Körperfettanteil", link: "#koerper", titel: "Körperfettanteil niedrig",
+          wert: w_, bezug, kurz: `Normal ${ziel}`, ziel, text, tipps: TIPPS.zunehmen });
+        else gut("fett", "koerper", "Körperfettanteil", w_, ziel, "#koerper");
+      }
     }
+    // Muskeln an Armen und Beinen nach der europäischen Sarkopenie-Leitlinie EWGSOP2
+    const glied = gliedmassenMuskeln(w);
+    if (glied && Date.now() - glied.ts < 90 * tage) {
+      if (!zonen.asm) ohneProfil.push(["Muskeln an Armen und Beinen", "Geschlecht und Größe"]);
+      else {
+        const grenze = zonen.asm.grenzen[0];
+        const w_ = `${zahl(glied.kg, 1)} kg`, ziel = `ab ${zahl(grenze, 1)} kg`;
+        if (rund(glied.kg, 1) < grenze) neu({ id: "muskel", bereich: "koerper", name: "Muskeln an Armen und Beinen", link: "#koerper", titel: "Muskelmasse an Armen und Beinen niedrig",
+          wert: w_, bezug: `${zahl(glied.kg / (p.groesse * p.groesse), 1)} kg/m², Messung vom ${datum(isoAusMs(glied.ts), "kurz")}`, kurz: `Normal ab ${zahl(zonen.asm.index, 1)} kg/m²`, ziel,
+          text: `Die europäische Sarkopenie-Leitlinie (EWGSOP2) wertet eine Muskelmasse an Armen und Beinen unter ${zahl(zonen.asm.index, 1)} kg je m² Körpergröße zum Quadrat bei ${wer} als niedrig – bei deiner Größe also unter ${zahl(grenze, 1)} kg. Die Waage schätzt diesen Wert; ärztlich wird zusätzlich die Kraft geprüft, etwa die Handkraft.`,
+          arzt: "Kommen nachlassende Kraft oder ungewollter Gewichtsverlust dazu, lass das ärztlich abklären.", tipps: TIPPS.muskel });
+        else gut("muskel", "koerper", "Muskeln an Armen und Beinen", w_, ziel, "#koerper");
+      }
+    }
+    // Fettfreie Masse (Magermasse) nach ESPEN
+    if (g[5] != null) {
+      if (!zonen.mager) ohneProfil.push(["Magermasse", "Geschlecht und Größe"]);
+      else {
+        const grenze = zonen.mager.grenzen[0];
+        const w_ = `${zahl(g[5], 1)} kg`, ziel = `ab ${zahl(grenze, 1)} kg`;
+        if (rund(g[5], 1) < grenze) neu({ id: "mager", bereich: "koerper", name: "Magermasse", link: "#koerper", titel: "Fettfreie Masse vermindert",
+          wert: w_, bezug: `${zahl(g[5] / (p.groesse * p.groesse), 1)} kg/m², ${bezug}`, kurz: `Normal ab ${zahl(zonen.mager.index)} kg/m²`, ziel,
+          text: `Die Europäische Gesellschaft für klinische Ernährung (ESPEN) wertet bei ${wer} eine fettfreie Masse unter ${zahl(zonen.mager.index)} kg je m² Körpergröße zum Quadrat als vermindert – ein Kriterium für Mangelernährung.`,
+          arzt: "Hast du ungewollt abgenommen, lass das ärztlich abklären.", tipps: TIPPS.muskel });
+        else gut("mager", "koerper", "Magermasse", w_, ziel, "#koerper");
+      }
+    }
+    if (ohneProfil.length) {
+      const fehlend = [p.geschlecht ? null : "Geschlecht", p.alter == null ? "Alter" : null, p.groesse ? null : "Größe"].filter(Boolean);
+      fehlt.push(`${ohneProfil.map((x) => x[0]).join(", ")}: Für die Einordnung ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ") || "das Profil"} im Garmin-Profil.`);
+    }
+    // Viszeralfett: Index von Withings ohne ärztliche Norm – Einteilung von Withings, so gekennzeichnet
     if (g[170] != null) {
-      const v = g[170];
-      if (v > 5) neu({ id: "viszeral", bereich: "koerper", name: "Viszeralfett", link: "#koerper", titel: "Viszeralfett erhöht", wert: zahl(v, 1), bezug,
-        kurz: "Normal bis 5", ziel: "0–5", text: "Viszeralfett liegt im Bauchraum um die Organe. Withings stuft einen Index von 0 bis 5 als normal ein und darüber als hoch. Viel Bauchfett erhöht das Risiko für Herz-Kreislauf-Erkrankungen und Diabetes.",
+      const v = rund(g[170], 1);
+      if (v > 5) neu({ id: "viszeral", bereich: "koerper", name: "Viszeralfett", link: "#koerper", titel: v > 10 ? "Viszeralfett laut Withings sehr hoch" : "Viszeralfett laut Withings hoch", wert: zahl(v, 1), bezug,
+        kurz: "Laut Withings gut bis 5", ziel: "bis 5", text: `Viszeralfett liegt im Bauchraum um die Organe; viel davon erhöht das Risiko für Herz-Kreislauf-Erkrankungen und Diabetes. Den Index berechnet Withings selbst und stuft bis 5 als gut ein, bis 10 als hoch und darüber als sehr hoch. Eine ärztliche Norm gibt es dafür nicht: Ärztlich zählt der Bauchumfang, gemessen in Höhe des Bauchnabels – erhöhtes Risiko ab ${p.geschlecht === "m" ? "94" : "80"} cm, deutlich erhöht ab ${p.geschlecht === "m" ? "102" : "88"} cm (WHO).`,
         tipps: TIPPS.viszeral });
-      else gut("viszeral", "koerper", "Viszeralfett", zahl(v, 1), "0–5", "#koerper");
-    }
-    if (g[227] != null && p.alter != null) {
-      const v = g[227];
-      if (v > p.alter + 3) neu({ id: "stoffwechsel", bereich: "koerper", name: "Stoffwechselalter", link: "#koerper", titel: "Stoffwechselalter über deinem Lebensalter",
-        wert: `${zahl(v)} Jahre`, bezug: `Lebensalter ${p.alter} Jahre`, kurz: `Lebensalter ${p.alter}`, ziel: `höchstens ${p.alter} Jahre`,
-        text: "Withings vergleicht deinen Grundumsatz mit dem Durchschnitt verschiedener Altersgruppen. Ein höheres Stoffwechselalter deutet auf wenig Muskelmasse im Verhältnis zum Gewicht hin.",
-        tipps: TIPPS.stoffwechsel });
-      else gut("stoffwechsel", "koerper", "Stoffwechselalter", `${zahl(v)} Jahre`, `bis ${p.alter + 3} Jahre`, "#koerper");
+      else gut("viszeral", "koerper", "Viszeralfett", zahl(v, 1), "bis 5 (laut Withings)", "#koerper");
     }
   }
   const nervR = wReihe(w, 167).length ? wReihe(w, 167) : null;
@@ -1262,7 +1393,7 @@ async function befundeBerechnen() {
   })();
   if (nervWert) {
     const wert = `${zahl(nervWert[1])} von 100`;
-    if (nervWert[1] < 50) neu({ id: "nerven", bereich: "koerper", name: "Nervengesundheit", link: "#koerper", titel: "Nervengesundheit der Füße niedrig", wert,
+    if (rund(nervWert[1]) < 50) neu({ id: "nerven", bereich: "koerper", name: "Nervengesundheit", link: "#koerper", titel: "Nervengesundheit der Füße niedrig", wert,
       bezug: `Messung vom ${datum(isoAusMs(nervWert[0]), "kurz")}`, kurz: "Normal über 50", ziel: "über 50",
       text: "Withings stuft Werte unter 50 als niedrig ein – ein mögliches Zeichen für eine Schädigung kleiner Nervenfasern an den Füßen (Neuropathie).",
       arzt: "Bei wiederholt niedrigen Werten, Taubheit, Kribbeln oder Brennen in den Füßen – und besonders bei Diabetes – lass das ärztlich abklären.",
@@ -1273,7 +1404,8 @@ async function befundeBerechnen() {
   // ---- Schlaf und Erholung
   const alt65 = p.alter != null && p.alter >= 65;
   const [sMin, sMax] = alt65 ? [7, 8] : [7, 9];
-  const sd = mittel7(k.schlaf_dauer);
+  const sdRoh = mittel7(k.schlaf_dauer);
+  const sd = sdRoh == null ? null : Math.round(sdRoh * 60) / 60; // auf Minuten genau, wie angezeigt
   if (sd != null) {
     const wert = dauer(sd * 3600), bezug = "Mittel der letzten 7 Nächte", ziel = `${sMin}–${sMax} Stunden`;
     const fuer = alt65 ? "Erwachsene ab 65" : "Erwachsene";
@@ -1285,7 +1417,7 @@ async function befundeBerechnen() {
       arzt: "Wenn du dauerhaft deutlich länger schläfst und dich trotzdem müde fühlst, lass das ärztlich abklären.", tipps: TIPPS.schlafViel });
     else gut("schlafdauer", "schlaf", "Schlafdauer", wert, ziel, "#schlaf");
   }
-  const ss = mittel7(k.schlaf_score);
+  const ss = rund(mittel7(k.schlaf_score));
   if (ss != null) {
     if (ss < 80) neu({ id: "schlafscore", bereich: "schlaf", name: "Schlafscore", link: "#schlaf", titel: ss < 60 ? "Schlafqualität schlecht" : "Schlafqualität ausbaufähig",
       wert: zahl(ss), bezug: "Mittel der letzten 7 Nächte", kurz: "Gut ab 80", ziel: "ab 80",
@@ -1293,17 +1425,17 @@ async function befundeBerechnen() {
       tipps: TIPPS.schlafQualitaet });
     else gut("schlafscore", "schlaf", "Schlafscore", zahl(ss), "ab 80", "#schlaf");
   }
-  const sp = mittel7(k.schlaf_spo2);
+  const sp = rund(mittel7(k.schlaf_spo2));
   if (sp != null) {
-    if (sp < 95) neu({ id: "spo2", bereich: "schlaf", stufe: sp < 90 ? "kritisch" : "hinweis", name: "Sauerstoffsättigung", link: "#schlaf",
-      titel: "Sauerstoffsättigung im Schlaf niedrig", wert: `${zahl(sp)} %`, bezug: "Mittel der letzten 7 Nächte", kurz: "Normal 95–100 %", ziel: "95–100 %",
-      text: "Normal sind 95 bis 100 %. Die Messung am Handgelenk ist allerdings ungenau und fällt oft etwas zu niedrig aus.",
+    if (sp < 94) neu({ id: "spo2", bereich: "schlaf", stufe: sp < 90 ? "kritisch" : "hinweis", name: "Sauerstoffsättigung", link: "#schlaf",
+      titel: sp < 90 ? "Sauerstoffsättigung im Schlaf deutlich niedrig" : "Sauerstoffsättigung im Schlaf etwas niedrig", wert: `${zahl(sp)} %`, bezug: "Mittel der letzten 7 Nächte", kurz: "Normal ab 94 %", ziel: "ab 94 %",
+      text: "Die British Thoracic Society nennt 94 bis 98 % als Normalbereich; wach liegen Gesunde unter 70 Jahren meist bei 96 bis 98 %. Im Schlaf ist die Sättigung etwas niedriger, kurze Abfälle sind normal. Ein Mittel unter 90 % spräche für einen nächtlichen Sauerstoffmangel. Die Messung am Handgelenk ist ungenau und fällt oft zu niedrig aus.",
       arzt: "Wenn du laut schnarchst, jemand Atemaussetzer bemerkt oder du tagsüber sehr müde bist, lass das ärztlich abklären (Verdacht auf Schlafapnoe).",
       tipps: ["Die Uhr nachts etwas enger und oberhalb des Handgelenkknochens tragen – das verbessert die Messung.",
         "Alkohol am Abend und Schlafmittel verschlechtern die Atmung im Schlaf.", "Übergewicht begünstigt Atemaussetzer im Schlaf."] });
-    else gut("spo2", "schlaf", "Sauerstoffsättigung im Schlaf", `${zahl(sp)} %`, "95–100 %", "#schlaf");
+    else gut("spo2", "schlaf", "Sauerstoffsättigung im Schlaf", `${zahl(sp)} %`, "ab 94 %", "#schlaf");
   }
-  const at = mittel7(k.schlaf_atem);
+  const at = rund(mittel7(k.schlaf_atem), 1);
   if (at != null) {
     if (at > 20 || at < 8) neu({ id: "atmung", bereich: "schlaf", name: "Atemfrequenz", link: "#schlaf",
       titel: at > 20 ? "Atemfrequenz im Schlaf erhöht" : "Atemfrequenz im Schlaf sehr niedrig", wert: `${zahl(at, 1)} pro Minute`, bezug: "Mittel der letzten 7 Nächte",
@@ -1314,7 +1446,7 @@ async function befundeBerechnen() {
   }
   const stressV = werteAb(k.stress, isoMinus(7), heute).filter((v) => v >= 0);
   if (stressV.length >= 3) {
-    const m = mittel(stressV);
+    const m = rund(mittel(stressV));
     if (m > 50) neu({ id: "stress", bereich: "schlaf", name: "Stress", link: "#schlaf", titel: "Stress im Alltag hoch", wert: zahl(m),
       bezug: "Tagesmittel der letzten 7 Tage", kurz: "Niedrig bis 50", ziel: "bis 50",
       text: "Garmin misst Stress über die Herzfrequenzvariabilität: 0 bis 25 ist Ruhe, 26 bis 50 niedrig, 51 bis 75 mittel und darüber hoch.",
@@ -1325,7 +1457,7 @@ async function befundeBerechnen() {
   // ---- Bewegung
   const schritteV = werteAb(k.schritte, isoMinus(7), heute);
   if (schritteV.length >= 4) {
-    const m = mittel(schritteV);
+    const m = rund(mittel(schritteV));
     if (m < 7000) neu({ id: "schritte", bereich: "bewegung", name: "Schritte", link: "#sport", titel: "Wenig Schritte", wert: zahl(m),
       bezug: "Mittel der letzten 7 Tage", kurz: `Mittel ${zahl(m)}, Ziel 7.000`, ziel: "ab 7.000 am Tag",
       text: "Eine große Auswertung vieler Studien (Lancet Public Health 2025) zeigt: Mit etwa 7.000 Schritten am Tag sinkt das Risiko für Herz-Kreislauf-Erkrankungen, Demenz und einen frühen Tod deutlich – verglichen mit 2.000 Schritten.",
@@ -1343,7 +1475,7 @@ async function befundeBerechnen() {
     else gut("intensitaet", "bewegung", "Intensitätsminuten", `${zahl(summe)} Min.`, "ab 150 Min. pro Woche", "#sport");
   }
   const faTag = letzter(k.fitnessalter);
-  const fa = faTag && faTag[0] >= isoMinus(30) ? faTag[1] : Number.isFinite(p.fitness.fitnessAge) ? p.fitness.fitnessAge : null;
+  const fa = rund(faTag && faTag[0] >= isoMinus(30) ? faTag[1] : Number.isFinite(p.fitness.fitnessAge) ? p.fitness.fitnessAge : null, 1);
   const lebensalter = p.alter ?? (Number.isFinite(p.fitness.chronologicalAge) ? p.fitness.chronologicalAge : null);
   if (fa != null && lebensalter != null) {
     const erreichbar = Number.isFinite(p.fitness.achievableFitnessAge) ? p.fitness.achievableFitnessAge : null;
@@ -1382,6 +1514,7 @@ function befundBox(befundListe, { offen = false, mitLink = false } = {}) {
       h("div", null, h("h3", null, b.titel), h("p", { class: "befund-wert" }, h("b", null, b.wert),
         b.bezug ? h("span", null, b.bezug) : null, b.ziel ? h("span", { class: "befund-ziel" }, `Ziel: ${b.ziel}`) : null))),
     b.text ? h("p", { class: "befund-text" }, b.text) : null,
+    GRUNDLAGE[b.id] ? h("p", { class: "befund-grundlage" }, `Grundlage: ${GRUNDLAGE[b.id]}`) : null,
     b.arzt ? h("p", { class: "befund-arzt" }, b.arzt) : null,
     b.tipps && b.tipps.length ? h("details", { class: "befund-tipps", open: offen || null }, h("summary", null, "Was du tun kannst"),
       h("ul", null, b.tipps.map((t) => h("li", null, t)))) : null,
@@ -1435,13 +1568,14 @@ function diagrammeIn(box) {
 }
 /** Verlaufskarte mit eigenem Zeitraum-Umschalter (7 Tage bis 12 Monate), Kennzahlen zum Zeitraum und Tabellenansicht.
  *  laden({von, tage, wochen, wahl, zr}) liefert {serien, opt, werte, liste, fussnote, tabelle, legende, leerText, unten} */
-async function verlauf({ id, titel = null, auswahl = null, laden, hoehe = "", standard = "30", mitAlle = false }) {
+async function verlauf({ id, titel = null, name = null, auswahl = null, laden, hoehe = "", standard = "30", mitAlle = false }) {
   const liste = mitAlle ? [...ZEITRAEUME, ZR_ALLE] : ZEITRAEUME;
   let zr = zrGewaehlt(id, standard, liste.map((x) => x[0]));
   const ids = auswahl ? auswahl.map((a) => String(a.id)) : [];
   let wahl = auswahl && auswahl.length ? zrGewaehlt(`${id}.wahl`, ids[0], ids) : null;
-  const seg = h("div", { class: "segmente zr", role: "group", "aria-label": titel ? `Zeitraum für ${titel}` : "Zeitraum" });
-  const chipsBox = auswahl && auswahl.length > 1 ? h("div", { class: "chips", role: "group", "aria-label": titel ? `${titel}: Auswahl` : "Auswahl" }) : null;
+  const benannt = titel || name;
+  const seg = h("div", { class: "segmente zr", role: "group", "aria-label": benannt ? `Zeitraum für ${benannt}` : "Zeitraum" });
+  const chipsBox = auswahl && auswahl.length > 1 ? chipsRand(h("div", { class: "chips", role: "group", "aria-label": benannt ? `${benannt}: Auswahl` : "Auswahl" })) : null;
   const inhalt = h("div", { class: "verlauf-inhalt" });
   const karte = h("div", { class: "verlauf" }, h("div", { class: "verlauf-kopf" }, titel ? h("h3", null, titel) : null, seg), chipsBox, inhalt);
   let nr = 0;
@@ -1589,7 +1723,7 @@ async function ansichtHeute() {
   if (ber && ber[0] >= isoMinus(2)) kacheln.push(kachel({ titel: "Trainingsbereitschaft", wert: zahl(ber[1]), link: "#sport",
     unter: letzter(bereitText) ? textDeutsch(letzter(bereitText)[1]) : "", funkeDaten: k.bereitschaft.filter((p) => p[0] >= isoMinus(30)) }));
   const bbh = amTag(k.bb_hoch, heute);
-  if (bbJetzt != null) kacheln.push(kachel({ titel: "Body Battery", wert: zahl(bbJetzt), link: `#tag/${heute}`, unter: bbh != null ? `Tageshöchstwert ${zahl(bbh)}` : "" }));
+  if (bbJetzt != null) kacheln.push(kachel({ titel: "Body Battery", wert: zahl(bbJetzt), link: "#tag", unter: bbh != null ? `Tageshöchstwert ${zahl(bbh)}` : "" }));
   const vo2 = letzter(k.vo2lauf);
   if (vo2) kacheln.push(kachel({ titel: "VO₂max Laufen", wert: zahl(vo2[1], 1), link: "#sport", funkeDaten: k.vo2lauf,
     unter: deltaText(vo2[1], vorTagen(k.vo2lauf, 90), 1, "", "in 90 Tagen") }));
@@ -1680,28 +1814,47 @@ async function ansichtKoerper() {
     const vor30 = (typ) => vorTagen(wReihe(w, typ), 30, letzteVoll[0]);
     const p = personAus(await Daten.info("garmin"), w);
     const zonen = koerperZonen(p);
-    // Wie in der Withings-App: jeder Wert mit Einordnung und Bereichen; was Withings nicht liefert, fehlt einfach
+    const delta = (typ, stellen, einheit) => deltaText(g[typ], vor30(typ), stellen, einheit, "in 30 Tagen");
     const marker = (typ, name, stellen, einheit, zone, befund = null, neben = null) => (g[typ] != null ? { name, zahl: g[typ], wert: zahl(g[typ], stellen), einheit, stellen,
-      zone: zone || null, befund, neben: neben ?? deltaText(g[typ], vor30(typ), stellen, einheit, "in 30 Tagen") } : null);
+      zone: zone || null, befund, neben: neben ?? delta(typ, stellen, einheit) } : null);
+    const index = (kg) => (p.groesse ? `${zahl(kg / (p.groesse * p.groesse), 1)} kg/m²` : null);
     const bmi = gewichtG && p.groesse ? gewichtG / (p.groesse * p.groesse) : null;
-    const fettNeben = g[8] != null ? [`${zahl(g[8], 1)} kg Fettmasse`, deltaText(g[8], vor30(8), 1, "kg", "in 30 Tagen")].filter(Boolean).join(", ") : null;
-    knoten.push(abschnitt("Zusammensetzung", `Messung vom ${datum(isoAusMs(letzteVoll[0]), "langJahr")}, ${uhr(letzteVoll[0])} Uhr`,
+    const glied = gliedmassenMuskeln(w);
+    const erwartet = grundumsatzErwartet(p, gewichtG);
+    // Ärztlich eingeordnet (mit Balken): was eine ärztliche Norm hat; das Viszeralfett nach Withings ist gekennzeichnet
+    const bewertet = [
+      marker(6, "Körperfettanteil", 1, "%", zonen.fett, bf.fett, g[8] != null ? [`${zahl(g[8], 1)} kg Fettmasse`, delta(8, 1, "kg")].filter(Boolean).join(", ") : null),
+      bmi ? { name: "Body-Mass-Index", zahl: bmi, wert: zahl(bmi, 1), einheit: "", stellen: 1, zone: zonen.bmi, befund: bf.bmi, neben: `${zahl(gewichtG, 1)} kg bei ${zahl(p.groesse * 100)} cm` } : null,
+      glied ? { name: "Muskeln an Armen und Beinen", zahl: glied.kg, wert: zahl(glied.kg, 1), einheit: "kg", stellen: 1, zone: zonen.asm || null, befund: bf.muskel,
+        neben: [index(glied.kg), datum(isoAusMs(glied.ts)) !== datum(isoAusMs(letzteVoll[0])) ? `Messung vom ${datum(isoAusMs(glied.ts), "kurz")}` : null].filter(Boolean).join(", ") } : null,
+      marker(5, "Magermasse", 1, "kg", zonen.mager, bf.mager, g[5] != null ? [index(g[5]), delta(5, 1, "kg")].filter(Boolean).join(", ") : null),
+      marker(170, "Viszeralfett", 1, "", zonen.viszeral, bf.viszeral),
+    ];
+    // Ohne ärztliche Norm für Waagen: nur der Wert
+    const ohneNorm = [
+      marker(76, "Muskelmasse gesamt", 1, "kg"),
+      marker(77, "Körperwasser", 1, "kg", null, null, g[77] != null && gewichtG ? [`${zahl((g[77] / gewichtG) * 100)} % des Gewichts`, delta(77, 1, "kg")].filter(Boolean).join(", ") : null),
+      marker(88, "Knochenmasse", 1, "kg"),
+      marker(226, "Grundumsatz", 0, "kcal", null, null, erwartet ? `erwartet etwa ${zahl(Math.round(erwartet / 10) * 10)} kcal (Mifflin-St Jeor)` : null),
+      marker(168, "Extrazelluläres Wasser", 1, "kg"), marker(169, "Intrazelluläres Wasser", 1, "kg"),
+      marker(227, "Stoffwechselalter", 0, "Jahre", null, null, p.alter != null ? `Lebensalter ${p.alter} Jahre` : null),
+    ];
+    const stufeVon = (z, v) => (z ? ((z.wort && z.wort(v)) || z.stufen[zoneIndex(z, v)][0]) : null);
+    // Entwicklung der letzten 30 Tage, wie Withings sie zusammenfasst
+    const m30 = vor30(76), f30 = vor30(8);
+    const trend = g[76] != null && g[8] != null && m30 != null && f30 != null
+      ? { wort: koerperTrendWort(g[76] - m30, g[8] - f30), muskel: g[76] - m30, fett: g[8] - f30 } : null;
+    const kurz = [g[6] != null && zonen.fett ? `Körperfett ${zahl(g[6], 1)} % ${stufeVon(zonen.fett, Math.round(g[6] * 10) / 10).toLowerCase()}` : null,
+      bmi ? `BMI ${zahl(bmi, 1)} ${stufeVon(zonen.bmi, Math.round(bmi * 10) / 10)}` : null, trend ? `30\u00a0Tage: ${trend.wort}` : null].filter(Boolean).join(", ");
+    knoten.push(klappAbschnitt("zusammensetzung", "Zusammensetzung", `Messung vom ${datum(isoAusMs(letzteVoll[0]), "kurz")}, ${uhr(letzteVoll[0])} Uhr${kurz ? `: ${kurz}` : ""}`,
       h("div", { class: "legende" }, teile.filter((t_) => t_[1] > 0).map(([name, , slot]) => h("span", null, h("i", { class: "kasten", style: { background: farbe(slot) } }), name))),
       balken,
-      markerListe([
-        marker(6, "Körperfettanteil", 1, "%", zonen.fett, bf.fett, fettNeben),
-        marker(76, "Muskelmasse", 1, "kg", zonen.muskel, bf.muskel),
-        bmi ? { name: "Body-Mass-Index", zahl: bmi, wert: zahl(bmi, 1), einheit: "", stellen: 1, zone: zonen.bmi, befund: bf.bmi, neben: `${zahl(gewichtG, 1)} kg bei ${zahl(p.groesse * 100)} cm` } : null,
-        marker(226, "Grundumsatz", 0, "kcal", grundumsatzZone(g[5])),
-        marker(170, "Viszeralfett", 1, "", zonen.viszeral, bf.viszeral),
-        marker(5, "Magermasse", 1, "kg", zonen.mager),
-        marker(88, "Knochenmasse", 1, "kg", zonen.knochen, bf.knochen),
-        marker(77, "Körperwasser", 1, "kg", zonen.wasser, bf.wasser, g[77] != null && gewichtG ? [`${zahl((g[77] / gewichtG) * 100)} % des Gewichts`, deltaText(g[77], vor30(77), 1, "kg", "in 30 Tagen")].filter(Boolean).join(", ") : null),
-        marker(168, "Extrazelluläres Wasser", 1, "kg"), marker(169, "Intrazelluläres Wasser", 1, "kg"),
-        marker(227, "Stoffwechselalter", 0, "Jahre", null, bf.stoffwechsel, p.alter != null ? `Lebensalter ${p.alter} Jahre` : null),
-      ]),
-      h("p", { class: "fussnote" }, koerperFussnote(zonen, p, g)),
-      befundBox([bf.fett, bf.viszeral, bf.muskel, bf.wasser, bf.knochen, bf.stoffwechsel])));
+      trend ? h("p", { class: "koerper-trend" }, h("span", null, "Letzte 30 Tage"), h("b", null, trend.wort),
+        h("span", null, `Muskeln ${vorzeichen(trend.muskel, 1)} kg, Fett ${vorzeichen(trend.fett, 1)} kg`)) : null,
+      markerListe(bewertet),
+      ohneNorm.some(Boolean) ? [h("h3", { class: "marker-zwischen" }, "Ohne ärztliche Norm für Waagen"), markerListe(ohneNorm)] : null,
+      h("p", { class: "fussnote" }, koerperFussnote(zonen, p, g, glied)),
+      befundBox([bf.fett, bf.bmi, bf.muskel, bf.mager, bf.viszeral])));
   }
 
   // ---- Körperregionen
@@ -1715,7 +1868,7 @@ async function ansichtKoerper() {
         const typ = +wahl;
         const [name, einheit, stellen] = W_TYPEN[typ];
         const roh = imBereich(wTaeglich(wReihe(w, typ)), von);
-        return { serien: [{ name, daten: wochen ? nachWochen(roh) : roh, slot: 1, stellen, einheit, endWert: true }], opt: { wochen },
+        return { serien: [{ name, daten: wochen ? nachWochen(roh) : roh, slot: 1, stellen, einheit, endWert: true }], opt: { wochen, minSpanne: KOERPER_SPANNE[typ] },
           werte: [...statistik(roh, stellen, einheit), veraenderung(roh, stellen, einheit)], fussnote: `${roh.length} Messtage` };
       } })));
   }
@@ -1734,18 +1887,30 @@ async function ansichtKoerper() {
   return { titel: "Körper", knoten };
 }
 function zahlOk(v) { return typeof v === "number" && Number.isFinite(v); }
-/** Woher die Bereiche stammen – nur für Werte, die auch angezeigt werden */
-function koerperFussnote(zonen, p, g) {
-  const teile = ["Bereiche wie in der Withings-App: BMI nach der Einteilung der WHO"];
-  if (zonen.fett && g[6] != null) teile.push(`Fettanteil nach dem Normalbereich von Withings für ${p.geschlecht === "w" ? "Frauen" : "Männer"}${p.alter != null ? ` mit ${p.alter} Jahren` : ""}`);
-  if (g[170] != null) teile.push("Viszeralfett nach Withings (bis 5 gut, bis 10 hoch)");
-  if (zonen.muskel) teile.push(`Muskeln, Magermasse, Wasser und Knochen gemessen an deiner Größe (${zahl(p.groesse * 100)} cm)`);
-  if (g[226] != null) teile.push("Grundumsatz verglichen mit dem, was deine Magermasse erwarten lässt (±20 %)");
-  let text = `${teile.join(", ")}.`;
-  if (!zonen.fett || !zonen.muskel) {
-    const fehlend = [p.geschlecht ? null : "Geschlecht", p.alter == null && !zonen.fett ? "Alter" : null, p.groesse ? null : "Größe"].filter(Boolean);
-    if (fehlend.length) text += ` Für weitere Bereiche ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`;
-  }
+/** Entwicklung der Zusammensetzung in einem Wort, wie Withings „Fettzunahme“. Ab 0,5 kg zählt eine Veränderung
+    (kleinere Schwankungen liegen im Messrauschen der Waage); verändert sich beides gleichsinnig, zählt das Größere. */
+function koerperTrendWort(dm, df) {
+  const s_ = 0.5;
+  const m = dm >= s_ ? 1 : dm <= -s_ ? -1 : 0, f = df >= s_ ? 1 : df <= -s_ ? -1 : 0;
+  if (!m && !f) return "stabil";
+  if (m === 1 && f === -1) return "Muskelaufbau und Fettabbau";
+  if (m === -1 && f === 1) return "Fettzunahme und Muskelabbau";
+  if (m === 1 && f === 1) return df > dm ? "Fettzunahme" : "Muskelaufbau";
+  if (m === -1 && f === -1) return -df >= -dm ? "Fettabbau" : "Muskelabbau";
+  if (m) return m === 1 ? "Muskelaufbau" : "Muskelabbau";
+  return f === 1 ? "Fettzunahme" : "Fettabbau";
+}
+/** Woher die Einordnung stammt – nur für Werte, die auch angezeigt werden */
+function koerperFussnote(zonen, p, g, glied) {
+  const teile = ["BMI nach der Einteilung der WHO"];
+  if (zonen.fett && g[6] != null) teile.push(`Körperfettanteil nach den Referenzwerten von Gallagher und Kollegen (2000) für ${zonen.fett.gruppe}`);
+  if (zonen.asm && glied) teile.push(`Muskeln an Armen und Beinen nach der europäischen Sarkopenie-Leitlinie EWGSOP2 (niedrig unter ${zahl(zonen.asm.index, 1)} kg/m²)`);
+  if (zonen.mager && g[5] != null) teile.push(`Magermasse nach ESPEN (vermindert unter ${zahl(zonen.mager.index)} kg/m², Kriterium für Mangelernährung)`);
+  let text = `Ärztliche Einordnung: ${teile.join("; ")}.`;
+  if (g[170] != null) text += ` Das Viszeralfett ist ein Index von Withings ohne ärztliche Norm; ärztlich zählt der Bauchumfang (erhöhtes Risiko ab ${p.geschlecht === "m" ? "94" : "80"} cm).`;
+  text += " Gesamtmuskelmasse, Wasser, Knochen und Grundumsatz schätzt die Waage; für sie gibt es keine ärztlichen Normwerte, die Knochendichte etwa misst nur eine DXA-Untersuchung.";
+  const fehlend = [p.geschlecht ? null : "Geschlecht", p.alter == null ? "Alter" : null, p.groesse ? null : "Größe"].filter(Boolean);
+  if (fehlend.length && (!zonen.fett || !zonen.mager)) text += ` Für weitere Einordnungen ${fehlend.length > 1 ? "fehlen" : "fehlt"} ${fehlend.join(" und ")} im Garmin-Profil.`;
   return text;
 }
 
@@ -1757,27 +1922,27 @@ const REGION_FARBEN = {
   dunkel: { optimal: "#3aa655", gut: "#3987e5", schlecht: "#b83a3a", ohne: "#56656b" },
 };
 const REGION_STUFEN = ["optimal", "gut", "schlecht"];
-/** Maßstab für die Farben: Bereiche für den ganzen Körper (für einzelne Bereiche nennt Withings keine eigenen Werte).
-    Fett: Normalbereich des Fettanteils von Withings. Muskeln: Normalbereich der Muskelmasse wie in der Withings-App,
-    umgerechnet auf das Gewicht dieser Messung – so passt die Farbe zur Einordnung „Normal“ in der Withings-App. */
-function regionMassstab(modus, p, gewicht) {
+/** Maßstab für die Farben. Für einzelne Körperbereiche gibt es keine ärztlichen Normwerte; die Farben übertragen
+    deshalb die Normen für den ganzen Körper:
+    Fett: Normalbereich des Körperfettanteils nach Gallagher und Kollegen (Alter, Geschlecht).
+    Muskeln: Untergrenze der fettfreien Masse nach ESPEN (15 bzw. 17 kg/m²), über das Verhältnis von Muskeln zu fettfreier
+    Masse dieser Messung in Muskeln umgerechnet und als Anteil am Gewicht ausgedrückt; ab 15 % darüber zählt es als optimal. */
+function regionMassstab(modus, p, gewicht, muskelJeMager = null) {
   if (modus === "fett") {
-    const ber = wBereich("fett", p);
-    if (!ber) return null;
-    const [a, b] = ber;
-    return { art: "fett", a, b, mitte: Math.round(((a + b) / 2) * 2) / 2 };
+    const f = fettNorm(p);
+    if (!f) return null;
+    const [a, b] = f.grenzen;
+    return { art: "fett", a, b, mitte: Math.round(((a + b) / 2) * 2) / 2, gruppe: f.gruppe };
   }
-  const z = koerperZonen(p).muskel;
+  const z = koerperZonen(p).mager;
   if (!z || !zahlOk(gewicht) || gewicht <= 0) return null;
-  const [kgA, kgB] = z.grenzen;
+  const kgA = z.grenzen[0] * (zahlOk(muskelJeMager) && muskelJeMager > 0.8 && muskelJeMager < 1 ? muskelJeMager : 0.95);
   const anteil = (kg) => Math.round((kg / gewicht) * 1000) / 10;
-  return { art: "muskel", a: anteil(kgA), b: anteil(kgB), mitte: anteil((kgA + kgB) / 2), kgA, gewicht };
+  return { art: "muskel", a: anteil(kgA), mitte: anteil(kgA * 1.15), kgA, gewicht, index: z.index };
 }
-/** Fett: bis zur Mitte des Normalbereichs optimal, bis zur Obergrenze gut, darüber schlecht; unter dem Normalbereich gut.
-    Muskeln: ab der Mitte des Normalbereichs optimal, ab der Untergrenze gut, darunter schlecht. */
 function regionEinordnung(modus, anteil, m) {
   if (anteil == null || !m) return null;
-  if (modus === "fett") return anteil > m.b ? "schlecht" : anteil > m.mitte || anteil < m.a ? "gut" : "optimal";
+  if (modus === "fett") return anteil >= m.b ? "schlecht" : anteil > m.mitte || anteil < m.a ? "gut" : "optimal";
   return anteil < m.a ? "schlecht" : anteil < m.mitte ? "gut" : "optimal";
 }
 function regionFarbe(stufe) { return REGION_FARBEN[istDunkel() ? "dunkel" : "hell"][stufe || "ohne"]; }
@@ -1806,7 +1971,7 @@ async function segmentAbschnitt(w) {
       onclick: () => { if (m !== modus) { modus = m; speicher.set("gesundheit.region", m); zeichne(); if (verlaufKarte) verlaufKarte.neuLaden(); } } }, name)));
     const typ = modus === "fett" ? 174 : 175;
     const anteil = modus === "fett" ? fettAnteil : muskelAnteil;
-    const massstab = regionMassstab(modus, p, g[1]);
+    const massstab = regionMassstab(modus, p, g[1], g[76] != null && g[5] ? g[76] / g[5] : null);
     const werte = {};
     for (const [k, pos, name] of REGIONEN) {
       const a_ = anteil(pos);
@@ -1849,11 +2014,11 @@ async function segmentAbschnitt(w) {
         const roh = imBereich(wTaeglich(wReihe(w, typ, pos)), von);
         return { name, daten: wochen ? nachWochen(roh) : roh, slot, stellen: 2, einheit: "kg", endWert: true };
       });
-      return { serien, opt: { wochen }, fussnote: `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in kg, je Messung der Body Scan mit Griff.` };
+      return { serien, opt: { wochen, minSpanne: { arme: 1, beine: 2, rumpf: 3 }[wahl] }, fussnote: `${modus === "fett" ? "Fettmasse" : "Muskelmasse"} in kg, je Messung der Body Scan mit Griff.` };
     } });
-  return abschnitt("Körperregionen", `Muskel- und Fettmasse von Armen, Beinen und Rumpf, Messung vom ${datum(isoAusMs(letzte[0]), "langJahr")}.`,
+  return klappAbschnitt("regionen", "Körperregionen", `Muskel- und Fettmasse von Armen, Beinen und Rumpf, Messung vom ${datum(isoAusMs(letzte[0]), "kurz")}`,
     umschalter, figurBox,
-    h("p", { class: "fussnote" }, "Die Body Scan misst die Körperregionen, wenn du den Griff mit beiden Händen hältst. „± 30 Tage“ ist die Veränderung gegenüber der Messung vor rund einem Monat. Vergleichswerte für einzelne Körperbereiche, wie sie die Withings-App zeigt, gibt Withings über die Schnittstelle nicht heraus; die Farben richten sich deshalb nach dem Normalbereich für den ganzen Körper."),
+    h("p", { class: "fussnote" }, "Die Body Scan misst die Körperregionen, wenn du den Griff mit beiden Händen hältst. „± 30 Tage“ ist die Veränderung gegenüber der Messung vor rund einem Monat. Für einzelne Körperbereiche gibt es keine ärztlichen Normwerte; die Farben übertragen deshalb die Normen für den ganzen Körper und dienen der Orientierung."),
     verlaufKarte);
 }
 
@@ -1867,12 +2032,12 @@ function regionLegende(modus, m, p) {
   }
   const f = (x) => zahl(x, Number.isInteger(x) ? 0 : 1);
   const grenzen = modus === "fett"
-    ? { optimal: `${f(m.a)}–${f(m.mitte)} %`, gut: `${f(m.mitte)}–${f(m.b)} %`, schlecht: `über ${f(m.b)} %` }
+    ? { optimal: `${f(m.a)}–${f(m.mitte)} %`, gut: `${f(m.mitte)}–${zahl(m.b - 0.1, 1)} %`, schlecht: `ab ${f(m.b)} %` }
     : { optimal: `ab ${f(m.mitte)} %`, gut: `${f(m.a)}–${f(m.mitte)} %`, schlecht: `unter ${f(m.a)} %` };
   const wer = p.geschlecht === "w" ? "Frauen" : "Männer";
   const erklaerung = modus === "fett"
-    ? `Fettanteil des Bereichs, gemessen am Normalbereich von Withings für ${wer}${W_BEREICHE.fett[p.geschlecht].length > 1 ? " deines Alters" : ""} (${spanne(m.a, m.b, "%")}). Unter ${f(m.a)} % zeigt die Figur Blau.`
-    : `Muskelanteil des Bereichs. Die Withings-App stuft Muskelmasse bei ${wer} mit ${zahl(p.groesse * 100)} cm ab ${zahl(m.kgA, 1)} kg als normal ein; bei deinem Gewicht von ${zahl(m.gewicht, 1)} kg sind das ${f(m.a)} %.`;
+    ? `Fettanteil des Bereichs, gemessen am Normalbereich des Körperfettanteils nach Gallagher und Kollegen für ${wer} ${m.gruppe} (${f(m.a)}–${zahl(m.b - 0.1, 1)} %); ab ${f(m.b)} % gilt er als erhöht. Unter ${f(m.a)} % zeigt die Figur Blau.`
+    : `Muskelanteil des Bereichs. Maßstab ist die Untergrenze der fettfreien Masse nach ESPEN (${zahl(m.index)} kg/m²), auf Muskeln und dein Gewicht von ${zahl(m.gewicht, 1)} kg umgerechnet: ${zahl(m.kgA, 1)} kg oder ${f(m.a)} %. Ab 15 % darüber zählt es als optimal.`;
   return h("div", { class: "region-legende" },
     h("div", { class: "region-stufen" }, REGION_STUFEN.map((st) => h("span", null, h("i", { style: { background: regionFarbe(st) } }), h("b", null, st), ` ${grenzen[st]}`))),
     h("p", null, erklaerung));
@@ -1976,7 +2141,7 @@ async function ansichtHerz() {
       const reihe = (liste) => { const p_ = liste.map((m) => [m.ts, m.puls]); return wochen ? nachWochen(p_) : tagesMittel(p_); };
       const mo = reihe(imZr.filter((m) => istMorgens(m.ts))), ab = reihe(imZr.filter((m) => !istMorgens(m.ts)));
       return { serien: [{ name: "Morgens", daten: mo, slot: 1, einheit: "bpm", endWert: true }, { name: "Abends", daten: ab, slot: 2, einheit: "bpm", endWert: true }].filter((x) => x.daten.length),
-        werte: statistik(imZr.map((m) => [m.ts, m.puls]), 0, "bpm"), opt: { wochen }, fussnote: wochen ? "Mittelwert je Woche." : "Mittelwert je Tag." };
+        werte: statistik(imZr.map((m) => [m.ts, m.puls]), 0, "bpm"), opt: { wochen, minSpanne: 10 }, fussnote: wochen ? "Mittelwert je Woche." : "Mittelwert je Tag." };
     } })));
 
     // Wochenmittel und letzte Messungen
@@ -1989,7 +2154,7 @@ async function ansichtHerz() {
     }
     const fmt = (l) => (l.length ? bpText(mw(l)) : "–");
     const letzte = bpAlle.slice(-14).reverse();
-    knoten.push(abschnitt("Wochenmittel und letzte Messungen", "Die letzten 26 Wochen und die 14 neuesten Messungen. Einzelwerte sind nach der Einteilung der Europäischen Hochdruckgesellschaft (ESH) eingestuft; das ersetzt keine ärztliche Beurteilung.", h("div", { class: "raster zwei" },
+    knoten.push(abschnitt("Wochenmittel und letzte Messungen", "Die letzten 26 Wochen und die 14 neuesten Messungen. Einzelwerte sind nach den Grenzwerten für die Messung zu Hause eingestuft (ESH 2023): unter 120/80 optimal, bis 134/84 normal, ab 135/85 erhöht, ab 180/110 sehr hoch. Das ersetzt keine ärztliche Beurteilung.", h("div", { class: "raster zwei" },
       h("div", { class: "tabellen-rahmen", style: { maxHeight: "420px" } }, h("table", { class: "tabelle" },
         h("thead", null, h("tr", null, h("th", null, "Woche"), h("th", null, "Morgens"), h("th", null, "Abends"), h("th", null, "Anzahl"))),
         h("tbody", null, [...wochen.values()].reverse().map((x) => h("tr", null, h("td", null, `KW ${x.kw}/${String(x.j).slice(2)}`), h("td", null, fmt(x.mo)), h("td", null, fmt(x.ab)), h("td", null, x.mo.length + x.ab.length)))))),
@@ -2007,8 +2172,9 @@ async function ansichtHerz() {
   }
   waagePuls.sort((x, y) => x[0] - y[0]);
   const rpLetzt = letzter(await kennzahl("ruhepuls", isoMinus(14)));
+  let rpAbschnitt = null;
   if (rpLetzt || waagePuls.length) {
-    knoten.push(abschnitt("Ruhepuls", rpLetzt ? `Zuletzt ${zahl(rpLetzt[1])} bpm am ${datum(rpLetzt[0], "kurz")}` : null, befundBox([bf.ruhepuls]), await verlauf({ id: "ruhepuls", laden: async ({ von, wochen }) => {
+    knoten.push(rpAbschnitt = abschnitt("Ruhepuls", rpLetzt ? `Zuletzt ${zahl(rpLetzt[1])} bpm am ${datum(rpLetzt[0], "kurz")}` : null, befundBox([bf.ruhepuls]), await verlauf({ id: "ruhepuls", laden: async ({ von, wochen }) => {
       const uhr_ = await kennzahl("ruhepuls", von);
       const waage = tagesMittel(imBereich(waagePuls, von));
       return {
@@ -2016,7 +2182,7 @@ async function ansichtHerz() {
           uhr_.length ? { name: "Ruhepuls (Uhr)", daten: wochen ? nachWochen(uhr_) : uhr_, slot: 1, einheit: "bpm", endWert: true } : null,
           waage.length ? { name: "Puls auf der Waage", daten: wochen ? nachWochen(waage) : waage, slot: 2, einheit: "bpm", endWert: true } : null,
         ].filter(Boolean),
-        werte: statistik(uhr_.length ? uhr_ : waage, 0, "bpm"), opt: { wochen },
+        werte: statistik(uhr_.length ? uhr_ : waage, 0, "bpm"), opt: { wochen, minSpanne: 10 },
       };
     } })));
   }
@@ -2024,7 +2190,7 @@ async function ansichtHerz() {
   // ---- HRV mit Normalbereich
   const hrvLetzt = letzter(await kennzahl("hrv", isoMinus(14)));
   if (hrvLetzt) {
-    knoten.push(abschnitt("Herzfrequenzvariabilität", `Mittelwert jeder Nacht. Die Fläche zeigt deinen persönlichen Normalbereich laut Garmin.${letzter(hrvText) ? ` Status: ${textDeutsch(letzter(hrvText)[1])}.` : ""}`,
+    nebenan(knoten, rpAbschnitt, abschnitt("Herzfrequenzvariabilität", `Mittelwert jeder Nacht. Die Fläche zeigt deinen persönlichen Normalbereich laut Garmin.${letzter(hrvText) ? ` Status: ${textDeutsch(letzter(hrvText)[1])}.` : ""}`,
       befundBox([bf.hrv]),
       await verlauf({ id: "hrv", laden: async ({ von, wochen }) => {
         const k = await kennzahlen(["hrv", "hrv_unten", "hrv_oben"], von);
@@ -2038,7 +2204,7 @@ async function ansichtHerz() {
             { name: "HRV", daten: hrv, slot: 1, einheit: "ms", endWert: true, z: 3 },
           ],
           werte: statistik(k.hrv, 0, "ms"),
-          opt: { wochen, tooltipExtra: (params) => { const x = isoAusMs(params[0].value[0]); return unten.has(x) ? `<div style="margin-top:4px;color:${css("--tinte-2")}">Normalbereich ${zahl(unten.get(x))}–${zahl(oben.get(x))} ms</div>` : ""; } },
+          opt: { wochen, minSpanne: 10, tooltipExtra: (params) => { const x = isoAusMs(params[0].value[0]); return unten.has(x) ? `<div style="margin-top:4px;color:${css("--tinte-2")}">Normalbereich ${zahl(unten.get(x))}–${zahl(oben.get(x))} ms</div>` : ""; } },
           tabelle: () => serienTabelle([{ name: "HRV", daten: hrv, einheit: "ms" }, { name: "Normal unten", daten: untenR, einheit: "ms" }, { name: "Normal oben", daten: obenR, einheit: "ms" }], { wochen }),
         };
       } })));
@@ -2048,18 +2214,25 @@ async function ansichtHerz() {
   const gefaesse = [91, 155, 140].filter((t_) => wReihe(w, t_).length);
   if (gefaesse.length) {
     knoten.push(abschnitt("Gefäße", "Pulswellengeschwindigkeit und Gefäßalter misst die Body Scan beim Wiegen.",
-      befundBox([bf.pwv, bf.gefaessalter]),
+      befundBox([bf.pwv]),
       await verlauf({ id: "gefaesse", standard: "182", auswahl: gefaesse.map((t_) => ({ id: t_, name: W_TYPEN[t_][0] })), laden: ({ von, wahl }) => {
         const [name, einheit, stellen] = W_TYPEN[+wahl];
         const roh = imBereich(wTaeglich(wReihe(w, +wahl)), von);
-        return { serien: [{ name, daten: roh, slot: 1, stellen, einheit, endWert: true }], werte: [...statistik(roh, stellen, einheit), veraenderung(roh, stellen, einheit)] };
+        return { serien: [{ name, daten: roh, slot: 1, stellen, einheit, endWert: true }], werte: [...statistik(roh, stellen, einheit), veraenderung(roh, stellen, einheit)],
+          opt: { minSpanne: +wahl === 91 ? 2 : 6 } };
       } })));
   }
 
   // ---- EKG
-  if (ekgListe.length) knoten.push(abschnitt("EKG", "Aufzeichnungen von Withings und Garmin. Tippe auf eine Aufzeichnung, um die Kurve zu sehen.",
-    befundBox([bf.ekg, bf.qtc]),
-    h("ul", { class: "liste" }, ekgListe.map((e_) => h("li", null, ekgZeile(e_, w))))));
+  if (ekgListe.length) {
+    const neueste = ekgListe.reduce((a_, b_) => ((b_.ts || 0) > (a_.ts || 0) ? b_ : a_));
+    const kl = ekgKlasse(neueste);
+    const ergebnis = kl === 1 ? "Hinweis auf Vorhofflimmern" : kl === 2 ? "nicht eindeutig" : kl === 0 ? "kein Vorhofflimmern" : null;
+    const kurz = `${ekgListe.length} ${ekgListe.length === 1 ? "Aufzeichnung" : "Aufzeichnungen"} von Withings und Garmin${neueste.ts ? `, zuletzt am ${datum(isoAusMs(neueste.ts * 1000), "kurz")}${ergebnis ? `: ${ergebnis}` : ""}` : ""}. Tippe auf eine Aufzeichnung, um die Kurve zu sehen.`;
+    knoten.push(klappAbschnitt("ekg", "EKG", kurz,
+      befundBox([bf.ekg, bf.qtc]),
+      h("ul", { class: "liste" }, ekgListe.map((e_) => h("li", null, ekgZeile(e_, w))))));
+  }
   if (!knoten.length) knoten.push(leer("Noch keine Herzwerte", "Blutdruck, Ruhepuls, Herzfrequenzvariabilität und EKG erscheinen hier, sobald Messungen da sind."));
   return { titel: "Herz", knoten };
 }
@@ -2261,7 +2434,8 @@ async function ansichtSchlaf() {
         const st = vorhanden.find((x) => x[0] === wahl)[1];
         const [name, einheit] = K[wahl];
         const r = await kennzahl(wahl, von);
-        return { serien: [{ name, daten: wochen ? nachWochen(r) : r, slot: 1, stellen: st, einheit, endWert: true }], werte: statistik(r, st, einheit), opt: { wochen },
+        return { serien: [{ name, daten: wochen ? nachWochen(r) : r, slot: 1, stellen: st, einheit, endWert: true }], werte: statistik(r, st, einheit),
+          opt: { wochen, minSpanne: { schlaf_atem: 4, schlaf_spo2: 4, schlaf_haut: 1 }[wahl] },
           fussnote: wahl === "schlaf_haut" ? "Abweichung von deinem üblichen Wert." : null };
       } })));
   }
@@ -2314,7 +2488,7 @@ async function ansichtSport() {
   let zr = zrGewaehlt("aktivitaeten", "30", zrListe.map((x) => x[0]));
   const segBox = h("div", { class: "segmente zr", role: "group", "aria-label": "Zeitraum der Aktivitäten" });
   const listeBox = h("div");
-  const chipsBox = h("div", { class: "chips", role: "group", "aria-label": "Sportart" });
+  const chipsBox = chipsRand(h("div", { class: "chips", role: "group", "aria-label": "Sportart" }));
   let anzahl = 15;
   const zeigeListe = () => {
     segBox.replaceChildren(...zrListe.map(([z, kurz, lang]) => h("button", { type: "button", "aria-pressed": String(z === zr), "aria-label": lang, title: lang,
@@ -2350,57 +2524,70 @@ async function ansichtSport() {
         h("span", { class: "kennzahlen" }, h("div", null, h("b", null, dauer((t_.ende - t_.start), false)), h("span", null, "Dauer")))))))));
   }
 
-  // Bewegung im Alltag
+  // Bewegung im Alltag: ein Diagramm, der Wert wird über Chips gewählt
   const balkenTage = (r, wochen) => (wochen ? nachWochen(r) : r);
   const tausender = (v) => (v >= 1000 ? `${zahl(v / 1000)}k` : zahl(v));
-  if (k.schritte.length) {
-    knoten.push(abschnitt("Bewegung im Alltag", "Bis 3 Monate je Tag, ab 6 Monaten als Mittel pro Tag in der Woche.", befundBox([bf.schritte, bf.intensitaet]), h("div", { class: "raster zwei" },
-      await verlauf({ id: "schritte", titel: "Schritte", laden: async ({ von, wochen }) => {
-        const [r, ziele] = await Promise.all([kennzahl("schritte", von), kennzahl("schrittziel", isoMinus(30))]);
-        const ziel = letzter(ziele)?.[1];
-        return { serien: [{ name: wochen ? "Schritte pro Tag (Wochenmittel)" : "Schritte", daten: balkenTage(r, wochen), slot: 1, art: "balken" }],
-          werte: [...statistik(r).slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), ziel ? { name: "Tage am Ziel", wert: `${zahl(r.filter((p_) => p_[1] >= ziel).length)} von ${zahl(r.length)}` } : null],
-          opt: { nullBasis: true, wochen, referenzen: ziel ? [{ wert: ziel, text: `Ziel ${zahl(ziel)}` }] : [], yFormat: tausender } };
-      } }),
-      k.im_mod.length ? await verlauf({ id: "intensitaet", titel: "Intensitätsminuten", laden: async ({ von, tage }) => {
-        const kk = await kennzahlen(["im_mod", "im_int"], von);
-        const int = new Map(kk.im_int);
-        const taeglich = kk.im_mod.map(([d, v]) => [d, v + 2 * (int.get(d) || 0)]);
-        const woechentlich = (tage == null || tage > 30);
-        const daten = woechentlich ? nachWochen(taeglich, "summe") : taeglich;
-        return { serien: [{ name: woechentlich ? "Minuten pro Woche" : "Minuten pro Tag", daten, slot: 1, art: "balken", einheit: "Min." }],
-          werte: [{ name: "Mittel pro Woche", wert: zahl(mittel(nachWochen(taeglich, "summe").map((p_) => p_[1]))), einheit: "Min." }],
-          opt: { nullBasis: true, wochen: woechentlich, referenzen: woechentlich ? [{ wert: 150, text: "Ziel 150" }] : [] },
-          fussnote: "Minuten mit hoher Intensität zählen doppelt, wie bei Garmin. Ziel laut WHO: 150 Minuten pro Woche." };
-      } }) : null,
-      k.etagen.length ? await verlauf({ id: "etagen", titel: "Etagen", hoehe: "klein", laden: async ({ von, wochen }) => {
-        const r = await kennzahl("etagen", von);
-        return { serien: [{ name: "Etagen", daten: balkenTage(r, wochen), slot: 1, art: "balken" }], werte: statistik(r).slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), opt: { nullBasis: true, rechts: 12, wochen } };
-      } }) : null,
-      k.aktivkcal.length ? await verlauf({ id: "aktivkcal", titel: "Aktivkalorien", hoehe: "klein", laden: async ({ von, wochen }) => {
-        const r = await kennzahl("aktivkcal", von);
-        return { serien: [{ name: "Aktivkalorien", daten: balkenTage(r, wochen), slot: 1, art: "balken", einheit: "kcal" }], werte: statistik(r, 0, "kcal").slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), opt: { nullBasis: true, rechts: 12, wochen } };
-      } }) : null)));
+  const ALLTAG = {
+    schritte: { name: "Schritte", da: k.schritte.length, laden: async ({ von, wochen }) => {
+      const [r, ziele] = await Promise.all([kennzahl("schritte", von), kennzahl("schrittziel", isoMinus(30))]);
+      const ziel = letzter(ziele)?.[1];
+      return { serien: [{ name: wochen ? "Schritte pro Tag (Wochenmittel)" : "Schritte", daten: balkenTage(r, wochen), slot: 1, art: "balken" }],
+        werte: [...statistik(r).slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), ziel ? { name: "Tage am Ziel", wert: `${zahl(r.filter((p_) => p_[1] >= ziel).length)} von ${zahl(r.length)}` } : null],
+        opt: { nullBasis: true, wochen, referenzen: ziel ? [{ wert: ziel, text: `Ziel ${zahl(ziel)}` }] : [], yFormat: tausender } };
+    } },
+    intensitaet: { name: "Intensitätsminuten", da: k.im_mod.length, laden: async ({ von, tage }) => {
+      const kk = await kennzahlen(["im_mod", "im_int"], von);
+      const int = new Map(kk.im_int);
+      const taeglich = kk.im_mod.map(([d, v]) => [d, v + 2 * (int.get(d) || 0)]);
+      const woechentlich = (tage == null || tage > 30);
+      const daten = woechentlich ? nachWochen(taeglich, "summe") : taeglich;
+      return { serien: [{ name: woechentlich ? "Minuten pro Woche" : "Minuten pro Tag", daten, slot: 1, art: "balken", einheit: "Min." }],
+        werte: [{ name: "Mittel pro Woche", wert: zahl(mittel(nachWochen(taeglich, "summe").map((p_) => p_[1]))), einheit: "Min." }],
+        opt: { nullBasis: true, wochen: woechentlich, referenzen: woechentlich ? [{ wert: 150, text: "Ziel 150" }] : [] },
+        fussnote: `${woechentlich ? "Summe pro Woche. " : ""}Minuten mit hoher Intensität zählen doppelt, wie bei Garmin. Ziel laut WHO: 150 Minuten pro Woche.` };
+    } },
+    etagen: { name: "Etagen", da: k.etagen.length, laden: async ({ von, wochen }) => {
+      const r = await kennzahl("etagen", von);
+      return { serien: [{ name: wochen ? "Etagen pro Tag (Wochenmittel)" : "Etagen", daten: balkenTage(r, wochen), slot: 1, art: "balken" }],
+        werte: statistik(r).slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), opt: { nullBasis: true, wochen } };
+    } },
+    aktivkcal: { name: "Aktivkalorien", da: k.aktivkcal.length, laden: async ({ von, wochen }) => {
+      const r = await kennzahl("aktivkcal", von);
+      return { serien: [{ name: wochen ? "Aktivkalorien pro Tag (Wochenmittel)" : "Aktivkalorien", daten: balkenTage(r, wochen), slot: 1, art: "balken", einheit: "kcal" }],
+        werte: statistik(r, 0, "kcal").slice(0, 1).map((x) => ({ ...x, name: "Mittel pro Tag" })), opt: { nullBasis: true, wochen } };
+    } },
+  };
+  const alltag = Object.entries(ALLTAG).filter(([, a_]) => a_.da).map(([id, a_]) => ({ id, name: a_.name }));
+  let alltagAbschnitt = null;
+  if (alltag.length) {
+    knoten.push(alltagAbschnitt = abschnitt("Bewegung im Alltag", "Bis 3 Monate je Tag, ab 6 Monaten als Mittel pro Tag in der Woche.", befundBox([bf.schritte, bf.intensitaet]),
+      await verlauf({ id: "alltag", titel: alltag.length === 1 ? alltag[0].name : null, name: "Bewegung im Alltag", auswahl: alltag, laden: (a_) => ALLTAG[a_.wahl].laden(a_) })));
   }
 
-  // Form und Leistung
-  const form = [];
-  const linie = (id, titel, ids, opt = {}, fussnote = null, mitMittel = false) => verlauf({ id, titel, standard: "91", laden: async ({ von, wochen }) => {
-    const kk = await kennzahlen(ids.map((x) => x[0]), von);
-    const serien = ids.map(([kid, name, slot, extra]) => (kk[kid].length ? { name, daten: wochen ? nachWochen(kk[kid]) : kk[kid], slot, endWert: true, verbinden: true, ...(extra || {}) } : null)).filter(Boolean);
-    const erste = kk[ids[0][0]];
-    return { serien, opt: { wochen, ...opt }, fussnote,
-      werte: erste.length ? [{ name: "Zuletzt", wert: ids[0][3] && ids[0][3].format ? ids[0][3].format(letzter(erste)[1]) : zahl(letzter(erste)[1], ids[0][3]?.stellen ?? 0) },
-        ids[0][3] && ids[0][3].format ? null : mitMittel ? statistik(erste, ids[0][3]?.stellen ?? 0)[0] : veraenderung(erste, ids[0][3]?.stellen ?? 0, "")] : [] };
-  } });
-  if (k.vo2lauf.length || k.vo2rad.length) form.push(await linie("vo2max", "VO₂max", [["vo2lauf", "Laufen", 1, { stellen: 1 }], ["vo2rad", "Radfahren", 2, { stellen: 1 }]].filter(([id]) => k[id].length), { yStellen: 0 }));
-  if (k.bereitschaft.length) form.push(await linie("bereitschaft", "Trainingsbereitschaft", [["bereitschaft", "Bereitschaft", 1]], { yMin: 0, yMax: 100, yIntervall: 25 }, null, true));
-  if (k.last_akut.length) form.push(await linie("trainingslast", "Trainingslast", [["last_akut", "Akut (7 Tage)", 1], ["last_chronisch", "Chronisch (28 Tage)", 2]], {}, null, true));
-  if (k.p5k.length) form.push(await linie("prognose", "Wettkampfprognose", [["p5k", "5 km", 1, { format: zeitText }], ["p10k", "10 km", 2, { format: zeitText }]], { yFormat: (v) => zeitText(v) }, "Kürzere Zeit ist besser."));
-  if (k.ausdauer.length) form.push(await linie("ausdauer", "Ausdauerwert", [["ausdauer", "Ausdauerwert", 1]]));
-  if (k.huegel.length) form.push(await linie("huegel", "Hill Score", [["huegel", "Hill Score", 1]]));
-  if (k.fitnessalter.length) form.push(await linie("fitnessalter", "Fitnessalter", [["fitnessalter", "Fitnessalter", 1, { stellen: 1 }]], { yStellen: 0 }));
-  if (form.length) knoten.push(abschnitt("Form und Leistung", null, h("div", { class: "raster zwei" }, form)));
+  // Form und Leistung: ebenfalls ein Diagramm mit Chips
+  const FORM = {
+    vo2max: { name: "VO₂max", reihen: [["vo2lauf", "Laufen", 1, { stellen: 1 }], ["vo2rad", "Radfahren", 2, { stellen: 1 }]].filter(([id]) => k[id].length), opt: { yStellen: 0, minSpanne: 6 } },
+    bereitschaft: { name: "Trainingsbereitschaft", reihen: [["bereitschaft", "Bereitschaft", 1]], opt: { yMin: 0, yMax: 100, yIntervall: 25 }, mitMittel: true },
+    trainingslast: { name: "Trainingslast", reihen: [["last_akut", "Akut (7 Tage)", 1], ["last_chronisch", "Chronisch (28 Tage)", 2]], mitMittel: true },
+    prognose: { name: "Wettkampfprognose", reihen: [["p5k", "5 km", 1, { format: zeitText }], ["p10k", "10 km", 2, { format: zeitText }]], opt: { yFormat: (v) => zeitText(v), zeitAchse: true, minSpanne: 120 }, fussnote: "Kürzere Zeit ist besser." },
+    ausdauer: { name: "Ausdauerwert", reihen: [["ausdauer", "Ausdauerwert", 1]], opt: { minSpanne: 500 } },
+    huegel: { name: "Hill Score", reihen: [["huegel", "Hill Score", 1]], opt: { minSpanne: 10 } },
+    fitnessalter: { name: "Fitnessalter", reihen: [["fitnessalter", "Fitnessalter", 1, { stellen: 1, einheit: "Jahre" }]], opt: { yStellen: 0, minSpanne: 4 } },
+  };
+  const formWahl = Object.entries(FORM).filter(([, f_]) => f_.reihen.length && k[f_.reihen[0][0]].length).map(([id, f_]) => ({ id, name: f_.name }));
+  if (formWahl.length) {
+    nebenan(knoten, alltagAbschnitt, abschnitt("Form und Leistung", "Werte von Garmin, bis 3 Monate je Tag, ab 6 Monaten als Wochenmittel.", await verlauf({ id: "form", standard: "91",
+      titel: formWahl.length === 1 ? formWahl[0].name : null, name: "Form und Leistung", auswahl: formWahl, laden: async ({ von, wochen, wahl }) => {
+        const f_ = FORM[wahl];
+        const kk = await kennzahlen(f_.reihen.map((x) => x[0]), von);
+        const serien = f_.reihen.map(([kid, name, slot, extra]) => (kk[kid].length ? { name, daten: wochen ? nachWochen(kk[kid]) : kk[kid], slot, endWert: true, verbinden: true, ...(extra || {}) } : null)).filter(Boolean);
+        const erste = kk[f_.reihen[0][0]];
+        const ex = f_.reihen[0][3] || {};
+        return { serien, opt: { wochen, ...(f_.opt || {}) }, fussnote: f_.fussnote || null,
+          werte: erste.length ? [{ name: "Zuletzt", wert: ex.format ? ex.format(letzter(erste)[1]) : zahl(letzter(erste)[1], ex.stellen ?? 0), einheit: ex.einheit },
+            ex.format ? null : f_.mitMittel ? statistik(erste, ex.stellen ?? 0)[0] : veraenderung(erste, ex.stellen ?? 0, ex.einheit || "")] : [] };
+      } })));
+  }
 
   // Prognose, Rekorde, Zonen
   const extras = [];
@@ -2684,9 +2871,16 @@ function wertDiagramm(div, name, daten, einheit, stellen, xEinheit, umgekehrt) {
 // ======================================================================
 // Ansicht: Tag
 // ======================================================================
+/** Neuester Tag mit gespeichertem Tagesverlauf, sonst null */
+function neuesterTag() {
+  const tage = Object.keys((Daten.index && Daten.index.dateien) || {}).map((p) => /^d\/tag\/(\d{4}-\d{2}-\d{2})\.enc$/.exec(p)?.[1]).filter(Boolean).sort();
+  return tage.length ? tage[tage.length - 1] : null;
+}
 async function ansichtTag(iso) {
   const heute = heuteIso();
-  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) iso = heute;
+  const ohneDatum = !iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso);
+  // Ohne Datum: der neueste Tag mit Daten, damit die Seite nicht mit einem noch leeren „heute“ beginnt
+  if (ohneDatum) { const n = neuesterTag(); iso = n && n <= heute ? n : heute; }
   const [tag, tw, w, akt] = await Promise.all([Daten.tag(iso), Daten.tageswerte(iso), Daten.withings(), Daten.aktivitaeten()]);
   const geh = (d) => { location.hash = `#tag/${d}`; };
   const eingabe = h("input", { type: "date", value: iso, max: heute, "aria-label": "Datum", onchange: (e) => e.target.value && geh(e.target.value) });
@@ -2694,7 +2888,8 @@ async function ansichtTag(iso) {
     h("button", { type: "button", "aria-label": "Vorheriger Tag", onclick: () => geh(isoPlus(iso, -1)) }, icon("zurueck", 20)),
     eingabe,
     h("button", { type: "button", "aria-label": "Nächster Tag", disabled: iso >= heute, onclick: () => geh(isoPlus(iso, 1)) }, icon("vor", 20))))];
-  knoten.push(h("p", { class: "leise", style: { margin: "6px 0 0" } }, datum(iso, "langJahr")));
+  knoten.push(h("p", { class: "leise", style: { margin: "6px 0 0" } }, datum(iso, "langJahr"),
+    ohneDatum && iso !== heute ? ", der neueste Tag mit Tagesverlauf. Für heute ist noch keiner abgerufen." : ""));
   const bereich = [tagMs(iso), tagMs(iso) + 86400000];
   if (tag) {
     const kurven = [];
@@ -2741,7 +2936,7 @@ async function ansichtTag(iso) {
       ]))))));
   }
   if (!tag && !gruppen.length && !aktTag.length && !eintraege.length) knoten.push(leer("Keine Daten an diesem Tag", ""));
-  return { titel: iso === heute ? "Heute im Detail" : "Tag im Detail", knoten };
+  return { titel: "Tag im Detail", knoten };
 }
 
 // ======================================================================
@@ -3092,7 +3287,7 @@ async function ansichtHinweise() {
     ? [fett(n === 1 ? "Ein Wert" : `${n} Werte`), ` ${n === 1 ? "liegt" : "liegen"} außerhalb des Optimalbereichs.`, arztSatz]
     : "Alle bewerteten Werte liegen im Optimalbereich."));
   knoten.push(h("p", { class: "fussnote", style: { marginTop: "0" } },
-    "Die Bereiche beruhen auf Empfehlungen von Fachgesellschaften, der WHO, Withings und Garmin. Sie ersetzen keine ärztliche Beratung, und Uhr und Waage liefern Schätzwerte. Bewertet wird meist das Mittel der letzten 7 Tage."));
+    "Eingeordnet wird nach ärztlichen Leitlinien und Studien (zum Beispiel WHO und Fachgesellschaften). Wo es dafür keine ärztliche Norm gibt, steht die Einschätzung von Withings oder Garmin – das steht unter jedem Hinweis. Die Hinweise ersetzen keine ärztliche Untersuchung; Uhr und Waage liefern Schätzwerte. Bewertet wird meist das Mittel der letzten 7 Tage."));
   for (const [id, name] of BEREICHE) {
     const l = b.liste.filter((x) => x.bereich === id);
     if (l.length) knoten.push(abschnitt(name, null, befundBox(l, { offen: true, mitLink: true })));
@@ -3104,16 +3299,18 @@ async function ansichtHinweise() {
   }
   if (!n && !b.ok.length) knoten.push(leer("Noch nichts zu bewerten", "Sobald genug Messwerte der letzten Tage da sind, erscheinen hier die Hinweise."));
   if (b.fehlt.length) knoten.push(abschnitt("Nicht bewertet", null, h("ul", { class: "fehlt-liste" }, b.fehlt.map((t) => h("li", null, t)))));
-  knoten.push(abschnitt("Worauf die Bereiche beruhen", null, h("ul", { class: "quellen" }, QUELLEN.map(([text, url]) =>
-    h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener" }, text) : text)))));
+  const quellenListe = (liste) => h("ul", { class: "quellen" }, liste.map(([text, url]) => h("li", null, url ? h("a", { href: url, target: "_blank", rel: "noopener" }, text) : text)));
+  knoten.push(abschnitt("Worauf die Einordnung beruht", "Ärztliche Leitlinien und Studien", quellenListe(QUELLEN.filter((q) => q[2] !== "hersteller")),
+    h("h3", { class: "quellen-zwischen" }, "Nur Angaben der Hersteller – dafür gibt es keine ärztliche Norm"), quellenListe(QUELLEN.filter((q) => q[2] === "hersteller"))));
   return { titel: "Hinweise", knoten };
 }
 async function hinweiseMarkieren() {
   if (!Daten.index) return;
-  const n = (await befunde()).liste.length;
+  const liste = (await befunde()).liste;
+  const n = liste.length, kritisch = liste.some((b) => b.stufe === "kritisch");
   document.querySelectorAll('[data-ziel="hinweise"]').forEach((a) => {
     const marke = a.querySelector(".nav-marke");
-    if (marke) { marke.textContent = n > 99 ? "99+" : String(n); marke.hidden = !n; }
+    if (marke) { marke.textContent = n > 99 ? "99+" : String(n); marke.hidden = !n; marke.classList.toggle("nur-hinweise", !kritisch); }
     a.setAttribute("aria-label", n ? `Hinweise, ${n} ${n === 1 ? "Wert" : "Werte"} außerhalb des Optimalbereichs` : "Hinweise");
   });
 }
@@ -3474,7 +3671,8 @@ function standZeigen() {
   let art = "";
   if (liste.some((x) => x.anmeldung_noetig || x.ok === false)) art = "fehler";
   else if (liste.some((x) => x.fehler) || stundenSeitAbruf() > 3) art = "warnung";
-  STAND.replaceChildren(h("span", { class: `stand-punkt ${art}`, "aria-hidden": "true" }), h("span", null, vorZeit(Daten.index.stand)),
+  STAND.replaceChildren(h("span", { class: `stand-punkt ${art}`, "aria-hidden": "true" }),
+    h("span", { class: "stand-lang" }, vorZeit(Daten.index.stand)), h("span", { class: "stand-kurz", "aria-hidden": "true" }, vorZeit(Daten.index.stand, true)),
     h("span", { class: "stand-version" }, `v${APP_VERSION}`));
   STAND.setAttribute("aria-label", `Datenstand ${vorZeit(Daten.index.stand)}, App-Version ${APP_VERSION}${art ? ", bitte Status prüfen" : ""}`);
 }

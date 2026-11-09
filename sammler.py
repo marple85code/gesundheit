@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 APP = "GesundheitsApp"
-VERSION = "1.2.3"
+VERSION = "1.2.5"
 STANDARD_ZEITZONE = "Europe/Berlin"
 UTC = timezone.utc
 

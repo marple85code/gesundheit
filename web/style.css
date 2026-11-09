@@ -43,7 +43,7 @@
   --phase-wach: #86b6ef; --phase-rem: #5598e7; --phase-leicht: #256abf; --phase-tief: #104281;
   --zone-1: #86b6ef; --zone-2: #5598e7; --zone-3: #2a78d6; --zone-4: #1c5cab; --zone-5: #104281;
   /* Zustand (fest, immer mit Text) */
-  --gut: #0ca30c; --gut-text: #006300; --warnung: #fab219; --ernst: #ec835a; --kritisch: #d03b3b; --kritisch-text: #b02a2a;
+  --gut: #0ca30c; --gut-text: #006300; --warnung: #fab219; --warnung-text: #7d5300; --ernst: #ec835a; --kritisch: #d03b3b; --kritisch-text: #b02a2a;
 
   --radius-gross: 18px;
   --radius: 14px;
@@ -66,7 +66,7 @@
     --serie-grau: #56656b;
     --phase-wach: #184f95; --phase-rem: #2a78d6; --phase-leicht: #6da7ec; --phase-tief: #b7d3f6;
     --zone-1: #184f95; --zone-2: #256abf; --zone-3: #3987e5; --zone-4: #6da7ec; --zone-5: #9ec5f4;
-    --gut-text: #0ca30c; --kritisch-text: #ff8a80;
+    --gut-text: #0ca30c; --kritisch-text: #ff8a80; --warnung-text: #f4c55a;
   }
 }
 :root[data-theme="dark"] {
@@ -81,7 +81,7 @@
   --serie-grau: #56656b;
   --phase-wach: #184f95; --phase-rem: #2a78d6; --phase-leicht: #6da7ec; --phase-tief: #b7d3f6;
   --zone-1: #184f95; --zone-2: #256abf; --zone-3: #3987e5; --zone-4: #6da7ec; --zone-5: #9ec5f4;
-  --gut-text: #0ca30c; --kritisch-text: #ff8a80;
+  --gut-text: #0ca30c; --kritisch-text: #ff8a80; --warnung-text: #f4c55a;
 }
 
 /* ---------------------------------------------------------------- Grundlagen */
@@ -126,7 +126,13 @@ button { cursor: pointer; }
   border-bottom: 1px solid transparent;
 }
 .kopf.mit-linie { border-bottom-color: var(--linie); }
-.kopf-titel { flex: 1; min-width: 0; font-size: 19px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Lange Titel brechen in eine zweite Zeile um, statt abgeschnitten zu werden */
+.kopf-titel {
+  flex: 1; min-width: 0; font-size: 19px; font-weight: 650; line-height: 1.2;
+  overflow: hidden; overflow-wrap: break-word; hyphens: auto;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+@media (max-width: 380px) { .kopf-titel { font-size: 17px; } }
 .kopf-zurueck {
   display: inline-grid; place-items: center; width: 40px; height: 40px; margin-left: -8px;
   border: 0; border-radius: 999px; background: transparent;
@@ -141,6 +147,8 @@ button { cursor: pointer; }
 .stand-punkt.warnung { background: var(--warnung); }
 .stand-punkt.fehler { background: var(--kritisch); }
 .stand-version { padding-left: 8px; border-left: 1px solid var(--linie); color: var(--tinte-3); font-variant-numeric: tabular-nums; }
+.stand-kurz { display: none; }
+@media (max-width: 420px) { .stand-lang { display: none; } .stand-kurz { display: inline; } }
 @media (max-width: 600px) { .kopf:not(.startseite) .stand-version { display: none; } }
 @media (max-width: 380px) {
   .kopf { gap: 8px; }
@@ -316,11 +324,25 @@ a.kachel:hover { border-color: var(--linie-stark); }
 .abschnitt:first-child { margin-top: 12px; }
 .abschnitt-kopf { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 8px 16px; margin-bottom: 14px; }
 .abschnitt-kopf p { margin-top: 4px; color: var(--tinte-2); font-size: 15px; max-width: 62ch; }
-.raster { display: grid; gap: 28px 24px; }
+/* Abschnitte zum Auf- und Zuklappen: der ganze Kopf ist die Schaltfläche, rechts ein Pfeil */
+details.klapp > summary { list-style: none; cursor: pointer; flex-wrap: nowrap; align-items: center; margin-bottom: 0; padding: 4px 0 10px; border-bottom: 1px solid var(--linie); border-radius: 4px; -webkit-tap-highlight-color: transparent; }
+details.klapp > summary::-webkit-details-marker { display: none; }
+details.klapp > summary > div { min-width: 0; }
+details.klapp[open] > summary { margin-bottom: 14px; }
+.klapp-pfeil { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--blatt-2); border: 1px solid var(--linie); color: var(--tinte-2); transition: transform .2s ease; }
+details.klapp[open] > summary .klapp-pfeil { transform: rotate(180deg); }
+details.klapp > summary:hover .klapp-pfeil { color: var(--tinte); }
+@media (prefers-reduced-motion: reduce) { .klapp-pfeil { transition: none; } }
+.raster { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px 24px; }
 @media (min-width: 960px) {
   .raster.zwei { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .raster.drei { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+/* Zwei verwandte Abschnitte: am Handy untereinander mit normalem Abstand, breit nebeneinander */
+.raster.paar { margin-top: 40px; row-gap: 40px; align-items: start; }
+.raster.paar > .abschnitt { margin-top: 0; }
+.raster.paar:first-child { margin-top: 12px; }
+@media (min-width: 960px) { .raster.paar { column-gap: 36px; } }
 
 /* Zeitraum-Auswahl */
 .filterzeile {
@@ -341,6 +363,8 @@ a.kachel:hover { border-color: var(--linie-stark); }
 .segmente button[aria-pressed="true"] { background: var(--tinte); color: var(--blatt); }
 .chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
 .chips::-webkit-scrollbar { display: none; }
+.chips.geht-weiter { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 44px), transparent); }
+@media (min-width: 960px) { .chips { flex-wrap: wrap; overflow-x: visible; } }
 .chips button {
   flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--linie); background: var(--blatt);
   font-size: 14px; color: var(--tinte-2); white-space: nowrap;
@@ -428,6 +452,16 @@ table.tabelle { width: 100%; border-collapse: collapse; font-size: 14px; font-va
 .marker-skala span.an.gut { background: var(--gut); }
 .marker-skala span.an.warn { background: var(--warnung); }
 .marker-skala span.an.neutral { background: var(--serie-1); }
+.marker-skala span.an.ernst { background: var(--ernst); }
+.marker-zwischen { margin: 22px 0 0; font-size: 13px; font-weight: 650; color: var(--tinte-2); }
+.marker-zwischen + .marker-liste { margin-top: 6px; }
+/* Entwicklung der Zusammensetzung in einem Wort (wie „Fettzunahme“ bei Withings) */
+.koerper-trend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 16px 0 0; }
+.koerper-trend span:first-child { flex-basis: 100%; font-size: 13px; color: var(--tinte-2); }
+.koerper-trend b { font-size: 21px; font-weight: 680; letter-spacing: -0.01em; }
+.koerper-trend span:last-child { font-size: 14px; color: var(--tinte-2); font-variant-numeric: tabular-nums; }
+.befund-grundlage { margin-top: 8px; font-size: 12.5px; color: var(--tinte-3); }
+.quellen-zwischen { margin: 22px 0 6px; font-size: 14px; font-weight: 650; color: var(--tinte-2); }
 .marker-skala .zeiger { position: absolute; top: -9px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--tinte); transform: translateX(-50%); }
 @media (forced-colors: active) {
   .marker-skala span.an { background: CanvasText; }
@@ -651,10 +685,16 @@ textarea.eingabe { min-height: 92px; resize: vertical; line-height: 1.4; }
 
 /* ---------------------------------------------------------------- Werte außerhalb des Optimalbereichs */
 .achtung { display: inline-grid; place-items: center; flex: none; line-height: 0; color: var(--kritisch); }
+/* Gelb mit dunklem Zeichen wie ein Warnschild; Rot bleibt für „ärztlich abklären“ */
+.achtung.stufe-hinweis { color: var(--warnung); }
+.achtung.stufe-hinweis svg path { stroke: #3d2a00; }
+.achtung.stufe-hinweis svg circle:not(:first-child) { fill: #3d2a00; }
 .kachel > .achtung { position: absolute; top: 11px; right: 11px; }
 .kachel.auffaellig { border-color: color-mix(in srgb, var(--kritisch) 40%, var(--linie)); }
+.kachel.auffaellig.stufe-hinweis { border-color: color-mix(in srgb, var(--warnung) 65%, var(--linie)); }
 .kachel.auffaellig .kachel-titel { padding-right: 24px; }
 .kachel-befund, .befund-kurz { font-size: 12.5px; font-weight: 600; line-height: 1.3; color: var(--kritisch-text); }
+.kachel.stufe-hinweis .kachel-befund, .befund-kurz.stufe-hinweis { color: var(--warnung-text); }
 .kachel-wert.text { font-size: 20px; line-height: 1.2; hyphens: manual; overflow-wrap: break-word; }
 .werte li.auffaellig .zahl { display: inline-flex; align-items: center; gap: 6px; }
 .befunde { display: grid; gap: 12px; margin: 0 0 20px; }
@@ -662,6 +702,7 @@ textarea.eingabe { min-height: 92px; resize: vertical; line-height: 1.4; }
   padding: 14px 16px 12px; border-radius: var(--radius); background: var(--blatt);
   border: 1px solid var(--linie); border-left: 4px solid var(--kritisch);
 }
+.befund.stufe-hinweis { border-left-color: var(--warnung); }
 .befund-kopf { display: flex; gap: 12px; align-items: flex-start; }
 .befund-kopf .achtung { margin-top: 1px; }
 .befund h3 { font-size: 16px; font-weight: 650; }
@@ -672,6 +713,7 @@ textarea.eingabe { min-height: 92px; resize: vertical; line-height: 1.4; }
   margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-klein); max-width: 68ch;
   background: color-mix(in srgb, var(--kritisch) 9%, var(--blatt)); font-size: 14.5px; color: var(--tinte);
 }
+.befund.stufe-hinweis .befund-arzt { background: color-mix(in srgb, var(--warnung) 16%, var(--blatt)); }
 .befund.stufe-kritisch .befund-arzt { font-weight: 560; }
 .befund-tipps { margin-top: 8px; }
 .befund-tipps summary {
@@ -718,6 +760,7 @@ textarea.eingabe { min-height: 92px; resize: vertical; line-height: 1.4; }
 }
 .leiste a .nav-marke { position: absolute; top: 5px; left: calc(50% + 4px); height: 20px; line-height: 16px; border: 2px solid var(--blatt); }
 .seitenleiste a .nav-marke { margin-left: auto; }
+.nav-marke.nur-hinweise { background: var(--warnung); color: #3d2a00; }
 
 /* Karte der Strecke */
 .karten-box { display: flex; flex-direction: column; gap: 10px; }
