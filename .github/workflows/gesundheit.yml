@@ -6,7 +6,7 @@ name: Gesundheit
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
