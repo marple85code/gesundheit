@@ -1,29 +1,28 @@
 /* Gesundheit - Service Worker: App offline verfügbar, Daten zwischengespeichert (verschlüsselt). */
-const VERSION = "gesundheit-app-1.2.7";
+const VERSION = "gesundheit-app-1.2.8";
 const DATEN = "gesundheit-daten";
 const SCHALE = [
-  "./", "index.html", "style.css?v=1.2.7", "start.js?v=1.2.7", "app.js?v=1.2.7", "ios-heute.js?v=1.2.7", "manifest.webmanifest",
+  "./", "index.html", "style.css?v=1.2.8", "start.js?v=1.2.8", "app.js?v=1.2.8", "ios-heute.js?v=1.2.8", "manifest.webmanifest",
   "vendor/echarts.min.js", "fonts/atkinson-next-latin.woff2", "fonts/atkinson-next-latin-ext.woff2",
   "icons/favicon.svg", "icons/icon-192.png",
   // Arztbericht: auch ohne Netz erstellbar
-  "bericht.js?v=1.2.7", "vendor/jspdf.umd.min.js", "vendor/jspdf.plugin.autotable.min.js",
+  "bericht.js?v=1.2.8", "vendor/jspdf.umd.min.js", "vendor/jspdf.plugin.autotable.min.js",
   "fonts/atkinson-next-regular.ttf", "fonts/atkinson-next-bold.ttf",
 ];
 
 self.addEventListener("install", (e) => {
-  // Jede Datei frisch vom Server holen: optionale Dateien bei 404 überspringen, damit die Installation nicht blockiert
+  // Jede Datei frisch vom Server holen: der Zusatz ?sw=… umgeht den Zwischenspeicher von GitHub Pages
+  // (bis zu 10 Minuten), damit nie eine alte Datei in die neue Version rutscht.
   e.waitUntil(caches.open(VERSION).then((c) => Promise.all(SCHALE.map(async (pfad) => {
-    try {
-      const url = new URL(pfad, self.registration.scope);
-      const frisch = new URL(url);
-      frisch.searchParams.set("sw", VERSION);
-      const r = await fetch(frisch, { cache: "reload" });
-      if (r.ok) await c.put(url, r);
-    } catch {
-      // Optionale Assets ignorieren, falls sie lokal/remote fehlen
-    }
+    const url = new URL(pfad, self.registration.scope);
+    const frisch = new URL(url);
+    frisch.searchParams.set("sw", VERSION);
+    const r = await fetch(frisch, { cache: "reload" });
+    if (!r.ok) throw new Error(`${pfad}: HTTP ${r.status}`);
+    await c.put(url, r);
   }))));
-  self.skipWaiting();
+  // Übernehmen erst auf Zuruf der App: Sie wartet, bis die laufende Version nichts mehr zu tun hat.
+  // Ohne App (alle Fenster zu) übernimmt die neue Version beim nächsten Öffnen von selbst.
 });
 
 // Offene Abrufe dieser Version: Die App fragt danach, bevor sie eine neue Version übernehmen lässt
@@ -45,13 +44,15 @@ self.addEventListener("activate", (e) => {
     .then(() => self.clients.claim()));
 });
 
-// Netzabruf mit Zeitlimit
+// Netzabruf mit Zeitlimit: Ein hängender Abruf soll weder die App noch das nächste Update aufhalten
+// (eine neue Version übernimmt erst, wenn die alte keine Abrufe mehr offen hat).
 function netz(anfrage, ms = 20000) {
   if (anfrage.mode === "navigate") return fetch(anfrage);
   const ab = new AbortController();
   const zeit = setTimeout(() => ab.abort(), ms);
   return fetch(anfrage, { signal: ab.signal }).finally(() => clearTimeout(zeit));
 }
+// In den Speicher schreiben, während die App die Antwort schon liest (nicht erst danach antworten)
 function nebenbei(e, arbeit) {
   e.waitUntil(zaehlen(arbeit.catch(() => {})));
 }
@@ -72,7 +73,7 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // Versionierte Datendateien ändern sich nie: aus dem Speicher, sonst laden
+  // Versionierte Datendateien ändern sich nie: aus dem Speicher, sonst laden (alte Versionen entfernen)
   if (url.pathname.includes("/d/") && url.searchParams.has("v")) {
     e.respondWith(zaehlen(caches.open(DATEN).then(async (c) => {
       const treffer = await c.match(anfrage);
@@ -91,15 +92,18 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
+  // Versionsnummer der veröffentlichten App: immer aus dem Netz (dafür ist sie da)
   if (url.pathname.endsWith("/version.json")) return;
 
+  // App selbst: aus dem Speicher dieser Version. Neue Versionen kommen als neuer Service Worker,
+  // deshalb hier nichts im Hintergrund überschreiben (sonst könnte eine alte Datei zurückkommen).
   e.respondWith(zaehlen((async () => {
     let c = null;
     try {
       c = await caches.open(VERSION);
       const treffer = await c.match(anfrage);
       if (treffer) return treffer;
-    } catch { c = null; }
+    } catch { c = null; } // Speicher nicht nutzbar: direkt aus dem Netz
     const r = await netz(anfrage);
     if (c && r.ok && url.pathname.indexOf("/d/") === -1) { const kopie = r.clone(); nebenbei(e, c.put(anfrage, kopie)); }
     return r;
