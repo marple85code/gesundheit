@@ -11,14 +11,14 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="style.css?v=1.2.6">
-<script src="start.js?v=1.2.6"></script>
+<link rel="stylesheet" href="style.css?v=1.2.7">
+<script src="start.js?v=1.2.7"></script>
 </head>
 <body>
 <div id="wurzel"><p class="laden">Gesundheit wird geladen …</p></div>
 <noscript><p class="laden">Bitte JavaScript aktivieren, damit deine Daten im Browser entschlüsselt werden können.</p></noscript>
 <script src="vendor/echarts.min.js" defer></script>
-<script src="app.js?v=1.2.6" defer></script>
-<script src="ios-heute.js?v=1.2.6" defer></script>
+<script src="app.js?v=1.2.7" defer></script>
+<script src="ios-heute.js?v=1.2.7" defer></script>
 </body>
 </html>
