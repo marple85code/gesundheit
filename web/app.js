@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2.8";
+const APP_VERSION = "1.2.9";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -195,6 +195,7 @@ function mittel(werte) { const v = werte.filter(Number.isFinite); return v.lengt
 // Schlüssel und Entschlüsselung (AES-256-GCM, gzip)
 // ======================================================================
 let AES = null;
+let SCHLUESSEL_ROH = null;
 function b64u(text) {
   const t = text.replace(/-/g, "+").replace(/_/g, "/");
   const bin = atob(t + "=".repeat((4 - (t.length % 4)) % 4));
@@ -203,7 +204,25 @@ function b64u(text) {
 async function schluesselAktivieren(text) {
   const roh = b64u(String(text).trim());
   if (roh.length !== 32) throw new Error("falsche Länge");
-  AES = await crypto.subtle.importKey("raw", roh, "AES-GCM", false, ["decrypt"]);
+  SCHLUESSEL_ROH = roh;
+  AES = await crypto.subtle.importKey("raw", roh, "AES-GCM", false, ["decrypt", "encrypt"]);
+}
+/** Verschlüsselt ein Objekt im selben Format wie der Datensammler (GSD1, AES-256-GCM, gzip). */
+async function verschluesselnPaket(pfad, objekt) {
+  const strom = new Blob([JSON.stringify(objekt)]).stream().pipeThrough(new CompressionStream("gzip"));
+  const klar = new Uint8Array(await new Response(strom).arrayBuffer());
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const geheim = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(pfad) }, AES, klar));
+  const aus = new Uint8Array(16 + geheim.length);
+  aus.set([71, 83, 68, 49], 0); aus.set(iv, 4); aus.set(geheim, 16);
+  return aus;
+}
+function b64d(puffer) {
+  let bin = "";
+  const b = puffer instanceof Uint8Array ? puffer : new Uint8Array(puffer);
+  for (let i = 0; i < b.length; i += 32768) bin += String.fromCharCode(...b.subarray(i, i + 32768));
+  return btoa(bin);
 }
 async function entschluesseln(pfad, puffer) {
   const b = new Uint8Array(puffer);
@@ -246,6 +265,20 @@ const Daten = {
     return this.cache.get(pfad);
   },
   async katalog() { return (await this.datei("d/katalog.enc")) || { werte: {}, texte: {}, jahre: [] }; },
+  /** Profilbild und Name aus der Cloud holen (d/profil.enc) und auf dieses Gerät übertragen, wenn es dort neuer ist. */
+  async profilAbholen() {
+    let r;
+    try { r = await fetch("d/profil.enc?t=" + Date.now(), { cache: "no-store" }); } catch { return; }
+    if (!r.ok) return; // noch nie übertragen oder offline
+    let p;
+    try { p = await entschluesseln("d/profil.enc", await r.arrayBuffer()); } catch { return; }
+    const lokalZeit = Number(speicher.get("gawi.profilbild.zeit")) || 0;
+    if (!p || !p.zeit || p.zeit <= lokalZeit) return;
+    speicher.set("gawi.profilbild.zeit", String(p.zeit));
+    if (p.bild) speicher.set("gawi.profilbild", p.bild); else speicher.set("gawi.profilbild", null);
+    if (p.name) speicher.set("gawi.name", p.name);
+    document.dispatchEvent(new CustomEvent("gawi:profil"));
+  },
   async jahr(j) { return (await this.datei(`d/tage/${j}.enc`)) || { werte: {}, texte: {} }; },
   async reihe(metrik, von = null, bis = null, art = "werte") {
     const kat = await this.katalog();
@@ -1922,8 +1955,8 @@ const REGIONEN = [["rumpf", 12, "Rumpf"], ["armR", 2, "Arm rechts"], ["armL", 3,
 // Einordnung je Bereich: Grün gut, Blau mittel, Rot schlecht – kräftige, leuchtende Farben, hell und dunkel gleich.
 // Grün und Rot bleiben auch bei Rot-Grün-Sehschwäche unterscheidbar (geprüft); die Legende nennt zusätzlich die Bereiche.
 const REGION_FARBEN = {
-  hell: { gut: "#00c853", mittel: "#2962ff", schlecht: "#e8112d", ohne: "#a7b1b4" },
-  dunkel: { gut: "#00c853", mittel: "#2962ff", schlecht: "#e8112d", ohne: "#56656b" },
+  hell: { gut: "#34c759", mittel: "#007aff", schlecht: "#ff3b30", ohne: "#a7b1b4" },
+  dunkel: { gut: "#30d158", mittel: "#0a84ff", schlecht: "#ff453a", ohne: "#56656b" },
 };
 const REGION_STUFEN = ["gut", "mittel", "schlecht"];
 /** Maßstab für die Farben. Für einzelne Körperbereiche gibt es keine ärztlichen Normwerte; die Farben übertragen
@@ -2106,7 +2139,19 @@ function koerperFigur(werte, modus, ganz = null) {
   };
   const koerper = s("g", { transform: "translate(20 0)" });
   svg.append(koerper);
-  koerper.append(s("ellipse", { cx: 200, cy: 54, rx: 28, ry: 35, class: "kopf-form" }), s("path", { d: "M188 82 L212 82 L214 110 L186 110 Z", class: "kopf-form" }));
+  // Kopf: das Profilbild, wenn eines gewählt ist (gawi.profilbild), sonst die gezeichnete Silhouette
+  const profilBild = speicher.get("gawi.profilbild");
+  koerper.append(s("path", { d: "M188 82 L212 82 L214 110 L186 110 Z", class: "kopf-form" }));
+  if (profilBild) {
+    const clipId = "kopf-clip-" + Math.random().toString(36).slice(2, 8);
+    svg.append(s("defs", null, s("clipPath", { id: clipId }, s("circle", { cx: 200, cy: 50, r: 36 }))));
+    koerper.append(
+      s("circle", { cx: 200, cy: 50, r: 36, fill: "var(--blatt-2)" }),
+      s("image", { href: profilBild, x: 164, y: 14, width: 72, height: 72, preserveAspectRatio: "xMidYMid slice", "clip-path": `url(#${clipId})` }),
+      s("circle", { cx: 200, cy: 50, r: 36, fill: "none", stroke: "var(--linie)", "stroke-width": 2 }));
+  } else {
+    koerper.append(s("ellipse", { cx: 200, cy: 54, rx: 28, ry: 35, class: "kopf-form" }));
+  }
   for (const [k, d] of Object.entries(FORMEN)) {
     const x = ganz || werte[k];
     const gemessen = x && (x.wert != null || x.anteil != null);
@@ -3424,11 +3469,42 @@ const SYNC_SPEICHER = "gesundheit.sync";
 const GH_API = "https://api.github.com";
 class SyncFehler extends Error { constructor(text, status = 0) { super(text); this.status = status; } }
 const warte = (ms) => new Promise((ok) => setTimeout(ok, ms));
+/** Bild (Data-URL) quadratisch verkleinern, damit es in den Cloud-Ablauf passt. */
+async function bildVerkleinern(dataUrl, ziel = 192, guete = 0.82) {
+  const img = await new Promise((ok, nein) => { const i = new Image(); i.onload = () => ok(i); i.onerror = nein; i.src = dataUrl; });
+  const c = document.createElement("canvas"); c.width = ziel; c.height = ziel;
+  const ctx = c.getContext("2d");
+  const k = Math.min(img.width, img.height);
+  ctx.drawImage(img, (img.width - k) / 2, (img.height - k) / 2, k, k, 0, 0, ziel, ziel);
+  return c.toDataURL("image/jpeg", guete);
+}
 const Sync = {
   zustand: "bereit", titel: "", text: "", adresse: null, nr: 0, ausblenden: null, zuletzt: null,
   laeuft() { return ["startet", "wartet", "laeuft"].includes(this.zustand); },
   async zugang() {
     try { const z = await Daten.datei("d/sync.enc"); return z && z.token && z.repo ? z : null; } catch { return null; }
+  },
+  /** Profilbild und Name verschlüsselt in die Cloud legen, damit andere Geräte sie übernehmen. */
+  async profil() {
+    try {
+      const z = await this.zugang();
+      if (!z || !AES) return; // ohne Sync-Token bleibt das Profil nur auf diesem Gerät
+      const bild = speicher.get("gawi.profilbild");
+      const name = speicher.get("gawi.name") || "";
+      const zeit = Date.now();
+      speicher.set("gawi.profilbild.zeit", String(zeit));
+      let klein = null;
+      if (bild) klein = await bildVerkleinern(bild, 192, 0.82).catch(() => bild);
+      let puffer = await verschluesselnPaket("d/profil.enc", { bild: klein, name, zeit });
+      if (b64d(puffer).length > 60000) { // zu groß für GitHub: stärker verkleinern
+        klein = bild ? await bildVerkleinern(bild, 128, 0.72).catch(() => klein) : null;
+        puffer = await verschluesselnPaket("d/profil.enc", { bild: klein, name, zeit });
+      }
+      const b64 = b64d(puffer);
+      if (b64.length > 64000) return; // passt nicht in den Ablauf – bleibt lokal
+      await this.rufe(z, "POST", `/repos/${z.repo}/actions/workflows/profil.yml/dispatches`,
+        { ref: z.zweig || "main", inputs: { bild: b64 } });
+    } catch { /* Profil bleibt dann eben nur auf diesem Gerät */ }
   },
   async rufe(z, methode, pfad, body) {
     let r;
@@ -3850,13 +3926,17 @@ async function start() {
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
   await route();
   Sync.fortsetzen();
+  Daten.profilAbholen().catch(() => {});
   // regelmäßig nach neuen Daten sehen
   setInterval(async () => {
     if (document.hidden) return;
     const alt = Daten.index && Daten.index.stand;
     try { await Daten.ladeIndex(); } catch { return; }
     if (Daten.index && Daten.index.stand !== alt) { Daten.cache.clear(); standZeigen(); neuZeichnen(); } else standZeigen();
+    Daten.profilAbholen().catch(() => {});
   }, 10 * 60 * 1000);
 }
 document.addEventListener("DOMContentLoaded", start);
+// Für das iOS-Design (ios-heute.js): Profilbild/Name ändern und in die Cloud übertragen
+window.GaWiSync = { profil: () => Sync.profil() };
 })();

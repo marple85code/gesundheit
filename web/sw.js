@@ -1,12 +1,12 @@
 /* Gesundheit - Service Worker: App offline verfügbar, Daten zwischengespeichert (verschlüsselt). */
-const VERSION = "gesundheit-app-1.2.8";
+const VERSION = "gesundheit-app-1.2.9";
 const DATEN = "gesundheit-daten";
 const SCHALE = [
-  "./", "index.html", "style.css?v=1.2.8", "start.js?v=1.2.8", "app.js?v=1.2.8", "ios-heute.js?v=1.2.8", "manifest.webmanifest",
+  "./", "index.html", "style.css?v=1.2.9", "start.js?v=1.2.9", "app.js?v=1.2.9", "ios-heute.js?v=1.2.9", "manifest.webmanifest",
   "vendor/echarts.min.js", "fonts/atkinson-next-latin.woff2", "fonts/atkinson-next-latin-ext.woff2",
   "icons/favicon.svg", "icons/icon-192.png",
   // Arztbericht: auch ohne Netz erstellbar
-  "bericht.js?v=1.2.8", "vendor/jspdf.umd.min.js", "vendor/jspdf.plugin.autotable.min.js",
+  "bericht.js?v=1.2.9", "vendor/jspdf.umd.min.js", "vendor/jspdf.plugin.autotable.min.js",
   "fonts/atkinson-next-regular.ttf", "fonts/atkinson-next-bold.ttf",
 ];
 
@@ -64,8 +64,8 @@ self.addEventListener("fetch", (e) => {
   if (url.origin !== self.location.origin) return;
 
   // Datenstand: immer zuerst aus dem Netz, ohne Netz der letzte bekannte
-  if (url.pathname.endsWith("/d/index.enc")) {
-    const schluessel = new URL("d/index.enc", self.registration.scope).href;
+  if (url.pathname.endsWith("/d/index.enc") || url.pathname.endsWith("/d/profil.enc")) {
+    const schluessel = new URL(url.pathname, self.registration.scope).href;
     e.respondWith(zaehlen(netz(anfrage).then((r) => {
       if (r.ok) { const kopie = r.clone(); nebenbei(e, caches.open(DATEN).then((c) => c.put(schluessel, kopie))); }
       return r;

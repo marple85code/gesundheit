@@ -73,7 +73,17 @@ body.ios-skin .stand {
 
 .ios-profil { position: relative; margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
 .ios-name { font-weight: 600; font-size: 14px; color: var(--tinte); white-space: nowrap; }
-@media (max-width: 440px) { .ios-name { display: none; } }
+/* Handy: Titel bekommt Platz in der ersten Zeile (nicht abgeschnitten), Status und Knöpfe rücken
+   darunter; der Name bleibt neben dem Avatar sichtbar und wird nur bei Platzmangel gekürzt. */
+@media (max-width: 640px) {
+  body.ios-skin .kopf { flex-wrap: wrap; row-gap: 8px; }
+  body.ios-skin .kopf .kopf-titel { flex: 0 1 auto; }
+  body.ios-skin .kopf .stand { order: 10; }
+  body.ios-skin .kopf .sync-knopf { order: 11; }
+  body.ios-skin .kopf .menue-knopf { order: 12; }
+  body.ios-skin .kopf.startseite h1 { font-size: clamp(26px, 8vw, 32px); }
+  .ios-name { display: inline; font-size: 13px; max-width: 38vw; overflow: hidden; text-overflow: ellipsis; }
+}
 .ios-avatar {
   width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
   background: linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%);
@@ -554,7 +564,7 @@ body.ios-heute .kacheln {
     });
   }
 
-  /* ---- Profilbild & Name (lokal je Gerät) ---- */
+  /* ---- Profilbild & Name (über Geräte synchronisiert, wenn der Sync-Knopf freigeschaltet ist) ---- */
   function nameLaden() { try { return localStorage.getItem(NAME_KEY) || ""; } catch (e) { return ""; } }
   function bildLaden() { try { return localStorage.getItem(BILD_KEY) || null; } catch (e) { return null; } }
   function bildSpeichern(d) { try { localStorage.setItem(BILD_KEY, d); } catch (e) {} }
@@ -592,6 +602,11 @@ body.ios-heute .kacheln {
   function profilAnlegen() {
     var kopf = document.querySelector("main .kopf, .kopf");
     if (!kopf || kopf.querySelector(".ios-profil")) return;
+    // Von einem anderen Gerät übertragenes Profilbild sofort im Avatar zeigen
+    document.addEventListener("gawi:profil", function () {
+      var w = document.querySelector(".ios-profil");
+      if (w) avatarZeichnen(w);
+    });
     var wrap = document.createElement("div");
     wrap.className = "ios-profil";
     wrap.innerHTML =
@@ -628,14 +643,19 @@ body.ios-heute .kacheln {
       try { n.trim() ? localStorage.setItem(NAME_KEY, n.trim()) : localStorage.removeItem(NAME_KEY); } catch (e) {}
       avatarZeichnen(wrap);
       zeileSetzen();
+      if (window.GaWiSync && window.GaWiSync.profil) window.GaWiSync.profil();
     });
     bWeg.addEventListener("click", function () {
       bildLoeschen(); menueSchliessen(); avatarZeichnen(wrap); bWegSichtbar();
+      if (window.GaWiSync && window.GaWiSync.profil) window.GaWiSync.profil();
     });
     datei.addEventListener("change", function () {
       var f = datei.files && datei.files[0];
       if (!f) return;
-      bildVerarbeiten(f, function (data) { bildSpeichern(data); avatarZeichnen(wrap); bWegSichtbar(); });
+      bildVerarbeiten(f, function (data) {
+        bildSpeichern(data); avatarZeichnen(wrap); bWegSichtbar();
+        if (window.GaWiSync && window.GaWiSync.profil) window.GaWiSync.profil();
+      });
       datei.value = "";
     });
     document.addEventListener("click", function (e) {
