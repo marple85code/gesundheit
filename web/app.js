@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.2";
+const APP_VERSION = "1.4.3";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4126,6 +4126,11 @@ async function eBlsLaden() {
   if (!r.ok) throw new Error("BLS nicht verfügbar");
   const liste = await r.json();
   E_BLS = liste.map((x) => ({ name: x[1], l: [x[2], x[3] || 0, x[4] || 0, x[5] || 0, x[6] || 0, x[7] || 0], quelle: "BLS", marke: "", n: eNorm(x[1]) }));
+  // zweite Datenbank: Schweizer Nährwertdatenbank (BLV, Quellenangabe erforderlich); Fehler hier stören die Suche nicht
+  try {
+    const r2 = await fetch("vendor/swiss.json");
+    if (r2.ok) E_BLS = E_BLS.concat((await r2.json()).map((x) => ({ name: x[1], l: [x[2], x[3] || 0, x[4] || 0, x[5] || 0, x[6] || 0, x[7] || 0], quelle: "Schweizer Nährwertdatenbank", marke: "", n: eNorm(x[1] + " " + (x[8] || "")) })));
+  } catch { /* nur BLS */ }
   return E_BLS;
 }
 function eSuchen(liste, text, max = 40) {
@@ -4386,6 +4391,7 @@ function eDialog(optionen) {
       h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen")),
       status, liste,
       h("p", { class: "e-klein" }, "Quellen: ", h("a", { href: "https://www.blsdb.de", target: "_blank", rel: "noopener" }, "Bundeslebensmittelschlüssel 4.0, Max Rubner-Institut (CC BY 4.0)"),
+        ", ",h("a", { href: "https://www.naehrwertdaten.ch", target: "_blank", rel: "noopener" }, "Schweizer Nährwertdatenbank, Bundesamt für Lebensmittelsicherheit und Veterinärwesen BLV"),
         " und ", h("a", { href: "https://de.openfoodfacts.org", target: "_blank", rel: "noopener" }, "Open Food Facts"),
         " (Daten von Freiwilligen, ODbL, nicht für medizinische Zwecke). Angaben ohne Gewähr."));
     zeichnen();

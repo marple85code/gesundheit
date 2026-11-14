@@ -33,7 +33,7 @@ function t(s) {
 }
 
 let C, O, doc, y;
-const VERSION = "1.4.2";
+const VERSION = "1.4.3";
 
 // Diese Hilfen gibt die App seit Version 1.2.2 mit. Eine ältere App, die nach einem Update kurz
 // diesen neueren Berichtsteil lädt, kennt sie noch nicht – dann gelten diese gleichlautenden Fassungen.
