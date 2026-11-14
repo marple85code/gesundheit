@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.5.4";
+const APP_VERSION = "1.5.5";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -2906,7 +2906,23 @@ async function ansichtAktivitaet(id) {
       h("tbody", null, det.runden.map((r, i) => h("tr", null, h("td", null, i + 1), h("td", null, r.s ? `${zahl(r.s / 1000, 2)} km` : "–"), h("td", null, zeitText(r.t)),
         h("td", null, r.v ? tempoText(r.v, laufen) : "–"), h("td", null, r.hf ? zahl(r.hf) : "–"), h("td", null, r.auf != null ? `${zahl(r.auf)} m` : "–"))))))));
   }
-  return { titel: a.name || sportName(a.typ), zurueck: "#sport", knoten };
+  const teilenDaten = () => {
+    const r = (det && det.reihen) || {};
+    const w = {};
+    if (a.distanz) w.distanz = { l: "Distanz", v: zahl(a.distanz / 1000, 2), e: "km" };
+    if (a.dauer) w.zeit = { l: "Zeit", v: zeitText(a.dauer), e: "" };
+    if (a.tempo && a.distanz) w.tempo = { l: laufen ? "Tempo" : "Geschwindigkeit", v: tempoText(a.tempo, laufen), e: laufen ? "min/km" : "km/h" };
+    if (a.hf) w.hf = { l: "Puls", v: zahl(a.hf), e: "bpm" };
+    if (a.auf != null) w.auf = { l: "Anstieg", v: zahl(a.auf), e: "m" };
+    if (a.kcal) w.kcal = { l: "Kalorien", v: zahl(a.kcal), e: "kcal" };
+    return { titel: a.name || sportName(a.typ), typ: sportName(a.typ), datum: datum(a.start.slice(0, 10), "langJahr"), datumIso: a.start.slice(0, 10), uhr: a.start.slice(11, 16),
+      track: det && det.track && det.track.length > 1 ? det.track : null, tempoReihe: r.v || null, hoeheReihe: r.h || null, w };
+  };
+  const teilenAktion = { text: "Teilen", zeichen: "↗", fn: async () => {
+    if (!window.GaWiTeilen) await new Promise((ok, fehler) => { const sk = h("script", { src: `teilen.js?v=${APP_VERSION}` }); sk.onload = ok; sk.onerror = fehler; document.head.append(sk); }).catch(() => {});
+    if (window.GaWiTeilen) window.GaWiTeilen.oeffnen(teilenDaten());
+  } };
+  return { titel: a.name || sportName(a.typ), zurueck: "#sport", knoten, aktion: teilenAktion };
 }
 // ---- Karte der Strecke: Route nach Puls-Zone, Tempo oder Höhe eingefärbt, mit Kilometermarken
 function abstandM(a, b) {
@@ -4777,7 +4793,7 @@ async function route() {
   KOPF_TITEL.textContent = ergebnis.titel;
   document.title = ergebnis.titel === "Heute" ? "Gesundheit" : `${ergebnis.titel} – Gesundheit`;
   KOPF_AKTION.hidden = !ergebnis.aktion;
-  if (ergebnis.aktion) { KOPF_AKTION.onclick = ergebnis.aktion.fn; KOPF_AKTION.setAttribute("aria-label", ergebnis.aktion.text); KOPF_AKTION.replaceChildren(h("span", { class: "ka-plus" }, "+"), h("span", { class: "ka-text" }, ergebnis.aktion.text)); }
+  if (ergebnis.aktion) { KOPF_AKTION.onclick = ergebnis.aktion.fn; KOPF_AKTION.setAttribute("aria-label", ergebnis.aktion.text); KOPF_AKTION.replaceChildren(h("span", { class: "ka-plus" }, ergebnis.aktion.zeichen || "+"), h("span", { class: "ka-text" }, ergebnis.aktion.text)); }
   KOPF_ZURUECK.hidden = !ergebnis.zurueck;
   if (ergebnis.zurueck) KOPF_ZURUECK.href = ergebnis.zurueck;
   KOPF.classList.toggle("startseite", ansicht === "heute"); // Versionsnummer am Handy nur auf der Startseite

@@ -949,3 +949,9 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .chip-haken svg, .haken-gruen svg { color: #34c759; stroke: #34c759; }
 .haken-gruen { display: inline-flex; margin-left: 6px; vertical-align: middle; }
 .akt-zeile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.teilen-dialog .dialog-inhalt { max-height: 92vh; overflow-y: auto; }
+.teilen-vorschau { display: flex; justify-content: center; margin: 8px 0 14px; }
+.teilen-gross { max-width: 100%; height: auto; width: auto; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+.teilen-reihe { margin: 10px 0; }
+.teilen-reihe > b { display: block; font-size: 13px; color: var(--tinte-3); font-weight: 600; margin-bottom: 6px; }
+.teilen-reihe .chips { display: flex; flex-wrap: wrap; gap: 8px; }
