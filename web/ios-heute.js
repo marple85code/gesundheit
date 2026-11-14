@@ -500,9 +500,9 @@ body.ios-heute .kacheln {
     if (wurzel.querySelector(".ios-stufe.l-sch, .chip.kritisch")) return "schlecht";
     if (wurzel.querySelector(".ios-stufe.l-mit, .chip.ernst, .ernst")) return "mittel";
     var a = wurzel.querySelector(".achtung");
-    if (a) return a.classList.contains("stufe-hinweis") ? "ok" : "schlecht";
+    if (a) return a.classList.contains("stufe-hinweis") ? "ok" : a.classList.contains("stufe-ernst") ? "mittel" : "schlecht";
     if (wurzel.classList.contains("auffaellig")) {
-      return wurzel.classList.contains("stufe-hinweis") ? "ok" : "schlecht";
+      return wurzel.classList.contains("stufe-hinweis") ? "ok" : wurzel.classList.contains("stufe-ernst") ? "mittel" : "schlecht";
     }
     return "optimal";
   }

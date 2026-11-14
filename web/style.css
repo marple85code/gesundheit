@@ -697,6 +697,10 @@ textarea.eingabe { min-height: 92px; resize: vertical; line-height: 1.4; }
 .achtung { display: inline-grid; place-items: center; flex: none; line-height: 0; color: var(--kritisch); }
 /* Gelb mit dunklem Zeichen wie ein Warnschild; Rot bleibt für „ärztlich abklären“ */
 .achtung.stufe-hinweis { color: var(--warnung); }
+.achtung.stufe-ernst { color: var(--ernst); }
+.kachel.auffaellig.stufe-ernst { border-color: color-mix(in srgb, var(--ernst) 65%, var(--linie)); }
+.kachel.stufe-ernst .kachel-befund, .befund-kurz.stufe-ernst { color: var(--ernst); }
+.befund.stufe-ernst { border-left-color: var(--ernst); }
 .achtung.stufe-hinweis svg path { stroke: #3d2a00; }
 .achtung.stufe-hinweis svg circle:not(:first-child) { fill: #3d2a00; }
 .kachel > .achtung { position: absolute; top: 11px; right: 11px; }
