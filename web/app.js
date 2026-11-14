@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.0.1";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4676,7 +4676,7 @@ function eDialog(optionen) {
   async function geminiFragen(key, bilder64) {
     const eigen = (speicher.get("gawi.gemini.modell") || "").trim();
     const modelle = eigen ? [eigen, ...GEM_MODELLE] : GEM_MODELLE;
-    const text = "Du siehst ein bis drei Fotos derselben Mahlzeit (eventuell aus verschiedenen Blickwinkeln, zähle nichts doppelt). Nenne jede erkennbare Zutat oder Komponente mit einer Schätzung der verzehrten Menge in Gramm (Zutat im Zustand wie gegessen, z. B. Nudeln gekocht). Verwende kurze, allgemeine deutsche Lebensmittelnamen ohne Marken. Gib keine Kalorien an. Gib höchstens 12 Positionen aus. Ist kein Essen zu sehen, gib eine leere Liste zurück.";
+    const text = "Du siehst ein bis drei Fotos derselben Mahlzeit (eventuell aus verschiedenen Blickwinkeln, zähle nichts doppelt). Nenne jede erkennbare Zutat oder Komponente mit einer Schätzung der verzehrten Menge in Gramm (Zutat im Zustand wie gegessen, z. B. Nudeln gekocht). Verwende kurze deutsche Lebensmittelnamen. Ist eine Marke auf der Verpackung lesbar, nenne sie vor dem Produktnamen (z. B. Ja Magerquark), sonst nur den allgemeinen Namen. Gib keine Kalorien an. Gib höchstens 12 Positionen aus. Ist kein Essen zu sehen, gib eine leere Liste zurück.";
     let letzter = "";
     for (const m of modelle) {
       let r;
@@ -4765,22 +4765,48 @@ function eDialog(optionen) {
   }
   async function pruefen(zutaten, bild) {
     let bls = []; try { bls = await eBlsLaden(); } catch { /* ohne Datenbank */ }
-    const finde = (n) => { let t = eSuchen(bls, n, 8); if (!t.length) { const w = n.split(/[\\s,]+/)[0]; if (w) t = eSuchen(bls, w, 8); } return t; };
-    const zeilen = zutaten.map((z) => ({ an: true, g: Math.round(Number(z.gramm)), name: z.name, treffer: finde(z.name), wahl: 0 }));
+    const woerterVon = (n) => eNorm(n).split(/[\s,\/()-]+/).filter((w) => w.length > 1);
+    const alleW = (n, x) => { const t = woerterVon(n), z = x.nz || (x.nz = (x.n || (x.n = eNorm(`${x.name} ${x.marke || ""}`))).replace(/[\s,\/()-]+/g, "")); return t.length > 0 && t.every((w) => z.includes(w)); };
+    const eigene = () => [...eLesen(E_GERICHTE, []).map(eGerichtLm), ...eLesen(E_EIGENE, [])];
+    const lokalFinden = (n) => {
+      const streng = [...eSuchen(eigene(), n, 5), ...eSuchen(bls, n, 12)].filter((x) => alleW(n, x));
+      let schwach = [];
+      const w = woerterVon(n); const letztes = w[w.length - 1];
+      if (letztes) schwach = eSuchen(bls, letztes, 6).filter((x) => !streng.includes(x));
+      return { streng, schwach };
+    };
+    const kombi = (r) => { r.treffer = [...r.streng, ...r.online, ...r.schwach]; if (r.wahl >= r.treffer.length) r.wahl = 0; };
+    const onlineSuchen = async (r, nachher) => {
+      r.laedt = true; r.hinweis = ""; nachher();
+      try { r.online = (await eOffSuche(r.name)).filter((x) => x.l && x.l[0] > 0).slice(0, 8); }
+      catch (e) { r.online = []; r.hinweis = e && e.message === "Limit" ? "Online-Limit erreicht, bitte kurz warten und den Namen erneut bestätigen." : "Online-Suche gerade nicht möglich."; }
+      r.laedt = false; const vorher = r.treffer[r.wahl]; kombi(r);
+      if (r.online.length && !r.streng.length) r.wahl = r.treffer.indexOf(r.online[0]); else if (vorher) { const i = r.treffer.indexOf(vorher); if (i >= 0) r.wahl = i; }
+      nachher();
+    };
+    const neueZeile = (name, g) => { const r = { an: true, g, name, online: [], streng: [], schwach: [], treffer: [], wahl: 0, laedt: false, hinweis: "" }; const l = lokalFinden(name); r.streng = l.streng; r.schwach = l.schwach; kombi(r); return r; };
+    const zeilen = zutaten.map((z) => neueZeile(z.name, Math.round(Number(z.gramm))));
     const liste = h("div", { class: "e-liste" }), summe = h("p", { class: "e-klein e-g-summe" });
     const aktual = () => { const s = eSumme(zeilen.filter((r) => r.an && r.treffer[r.wahl]).map((r) => ({ g: r.g, l: r.treffer[r.wahl].l }))); summe.textContent = `Gesamt ungefähr ${zahl(Math.round(s.kcal))} kcal, Eiweiß ${zahl(eRund(s.p, 1), 1)} g, Kohlenhydrate ${zahl(eRund(s.c, 1), 1)} g, Fett ${zahl(eRund(s.f, 1), 1)} g.`; };
     const zeichneZeilen = () => {
       liste.replaceChildren(...zeilen.map((r) => {
-        const cb = h("input", { type: "checkbox", checked: r.an ? true : null, "aria-label": "Übernehmen" }); cb.addEventListener("change", () => { r.an = cb.checked; aktual(); });
-        const g = h("input", { type: "number", inputmode: "decimal", min: 1, max: 5000, value: r.g, "aria-label": "Gramm", style: { width: "80px" } }); g.addEventListener("input", () => { r.g = Number(g.value) || 0; aktual(); });
-        const sel = h("select", { "aria-label": "Lebensmittel" }, r.treffer.length ? r.treffer.map((t, i) => h("option", { value: i, selected: i === r.wahl ? true : null }, `${t.name} (${Math.round(t.l[0])} kcal/100 g)`)) : [h("option", { value: -1 }, "Nichts gefunden, bitte suchen")]);
+        const cb = h("input", { type: "checkbox", checked: r.an ? true : null, "aria-label": "Übernehmen", style: { flex: "none" } }); cb.addEventListener("change", () => { r.an = cb.checked; aktual(); });
+        const g = h("input", { type: "number", inputmode: "decimal", min: 1, max: 5000, value: r.g, "aria-label": "Gramm", style: { width: "84px", flex: "none", boxSizing: "border-box" } }); g.addEventListener("input", () => { r.g = Number(g.value) || 0; aktual(); });
+        const opt = (t, i) => h("option", { value: i, selected: i === r.wahl ? true : null }, `${t.marke ? t.marke + " " : ""}${t.name} (${Math.round(t.l[0])} kcal/100 g${t.quelle ? ", " + t.quelle : ""})`);
+        const sel = h("select", { "aria-label": "Lebensmittel", style: { width: "100%", minWidth: "0", boxSizing: "border-box", padding: "8px", fontSize: "15px", borderRadius: "10px" } },
+          r.treffer.length ? r.treffer.map(opt) : [h("option", { value: -1 }, r.laedt ? "Suche online …" : "Nichts gefunden, bitte Namen ändern")]);
         sel.addEventListener("change", () => { r.wahl = Number(sel.value); aktual(); });
-        const such = h("input", { type: "text", class: "e-suche", value: r.name, "aria-label": "Suchbegriff", autocomplete: "off" });
-        such.addEventListener("change", () => { r.name = such.value; r.treffer = finde(r.name); r.wahl = 0; zeichneZeilen(); });
-        return h("div", { class: "e-gericht", style: { display: "block", padding: "8px 0" } }, h("div", { class: "e-zeile-oben" }, cb, such, g, h("small", null, "g")), sel);
+        const such = h("input", { type: "text", class: "e-suche", value: r.name, "aria-label": "Suchbegriff", autocomplete: "off", style: { flex: "1", minWidth: "0", width: "100%", boxSizing: "border-box" } });
+        such.addEventListener("change", () => { r.name = such.value; const l = lokalFinden(r.name); r.streng = l.streng; r.schwach = l.schwach; r.online = []; r.wahl = 0; kombi(r); zeichneZeilen(); onlineSuchen(r, zeichneZeilen); });
+        const on = h("button", { type: "button", class: "e-link", onclick: () => onlineSuchen(r, zeichneZeilen) }, "Online suchen");
+        if (!r.streng.length && !r.online.length && !r.laedt && !r.hinweis && !r.versucht) { r.versucht = true; setTimeout(() => onlineSuchen(r, zeichneZeilen), 0); }
+        return h("div", { class: "e-gericht", style: { display: "block", padding: "10px 0", borderBottom: "1px solid rgba(128,128,128,.2)" } },
+          h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "6px" } }, cb, such),
+          h("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "6px" } }, g, h("small", null, "g"), h("span", { style: { flex: "1" } }), on),
+          sel, r.laedt ? h("small", { class: "e-klein" }, "Suche online …") : null, r.hinweis ? h("small", { class: "e-klein" }, r.hinweis) : null);
       })); aktual();
     };
-    const mehr = h("button", { class: "knopf zweit", type: "button", onclick: () => { zeilen.push({ an: true, g: 100, name: "", treffer: [], wahl: 0 }); zeichneZeilen(); } }, "Zutat ergänzen");
+    const mehr = h("button", { class: "knopf zweit", type: "button", onclick: () => { zeilen.push(neueZeile("", 100)); zeichneZeilen(); } }, "Zutat ergänzen");
     const gName = h("input", { type: "text", class: "e-suche", placeholder: "Name des Gerichts", "aria-label": "Name des Gerichts", autocomplete: "off" });
     const gCb = h("input", { type: "checkbox", "aria-label": "Als Gericht speichern" });
     const gBox = h("label", { class: "e-zeile-oben", style: { alignItems: "center", gap: "8px" } }, gCb, h("span", null, "Auch als eigenes Gericht mit Foto speichern"));
@@ -5010,7 +5036,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.0.0): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.0.1): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
