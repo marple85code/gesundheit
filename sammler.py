@@ -1482,36 +1482,9 @@ class GarminSammler:
             b = BEREICHE[art]
             if time.time() - float(self.z["zuletzt"].get(art, 0)) < b.intervall - 120:
                 continue
-            try:
-                self.bereich(art, von, heute)
-            except (AnmeldungNoetig, Gebremst, BudgetErschoepft):
-                raise
-            except Exception as e:  # ein Fehler darf die anderen Werte nicht aufhalten
-                self.bericht.fehler(f"Garmin Tageswerte {art}", e)
-                continue
+            self.bereich(art, von, heute)
             self.z["zuletzt"][art] = time.time()
             self.z["cursor"].setdefault(art, von.isoformat())
-        self.heute_direkt()
-
-    def heute_direkt(self) -> None:
-        """Heute und gestern einzeln abrufen: das ist dieselbe Zusammenfassung wie in der Garmin-App
-        (Schritte, aktive Minuten ...) und gilt auch, wenn der Bereichsabruf nichts liefert."""
-        if time.time() - float(self.z["zuletzt"].get("heute_direkt", 0)) < 20 * 60:
-            return
-        for n in (0, 1):
-            tag = (self.heute() - timedelta(days=n)).isoformat()
-            try:
-                antwort = self.g.rufe("get_user_summary", tag)
-            except (AnmeldungNoetig, Gebremst, BudgetErschoepft):
-                raise
-            except Exception as e:
-                self.bericht.fehler(f"Garmin Tageszusammenfassung {tag}", e)
-                continue
-            if isinstance(antwort, dict) and antwort:
-                if not _datum_aus(antwort):
-                    antwort = {**antwort, "calendarDate": tag}
-                self.verarbeiten("tag", [antwort], date.fromisoformat(tag), date.fromisoformat(tag))
-        self.z["zuletzt"]["heute_direkt"] = time.time()
 
     def historie(self) -> None:
         """Rueckwaerts in Zeitfenstern bis zum Beginn der Garmin-Daten."""
