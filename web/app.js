@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.10";
+const APP_VERSION = "1.7.11";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4681,7 +4681,7 @@ function eDialog(optionen) {
     for (const m of modelle) {
       let r;
       try {
-        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: "POST", signal: AbortSignal.timeout(40000), headers: { "Content-Type": "application/json", "x-goog-api-key": key },
           body: JSON.stringify({ contents: [{ parts: [{ text }, { inline_data: { mime_type: "image/jpeg", data: bild64 } }] }],
             generationConfig: { responseMimeType: "application/json", temperature: 0.2, responseSchema: { type: "OBJECT", properties: { zutaten: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, gramm: { type: "NUMBER" } }, required: ["name", "gramm"] } } }, required: ["zutaten"] } } }) });
       } catch { throw new Error("Keine Verbindung zu Google."); }
@@ -4712,7 +4712,7 @@ function eDialog(optionen) {
         h("div", { class: "knopf-zeile" }, h("button", { class: "e-link", type: "button", onclick: () => { if (window.confirm("Gespeicherten Schlüssel von diesem Gerät entfernen?")) { speicher.set("gawi.gemini", null); start(); } } }, "Schlüssel entfernen")));
     }
     async function auswerten(url) {
-      ort.replaceChildren(); meld.textContent = "Foto wird ausgewertet …";
+      ort.replaceChildren(h("img", { src: url, alt: "", style: { width: "100%", maxHeight: "40vh", objectFit: "cover", borderRadius: "12px" } })); meld.textContent = "Foto wird ausgewertet …"; hinweis.hidden = true;
       try {
         const img = await new Promise((ok, nein) => { const i = new Image(); i.onload = () => ok(i); i.onerror = nein; i.src = url; });
         const k = Math.min(1, 1024 / Math.max(img.width, img.height));
@@ -4720,9 +4720,9 @@ function eDialog(optionen) {
         c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
         const klein = c.toDataURL("image/jpeg", 0.8);
         const z = await geminiFragen(speicher.get("gawi.gemini"), klein.split(",")[1]);
-        if (!z.length) { meld.textContent = "Auf dem Foto wurde nichts Essbares erkannt. Versuche es mit einem anderen Foto oder trage von Hand ein."; start(); return; }
-        meld.textContent = ""; pruefen(z, klein);
-      } catch (e) { meld.textContent = `${e && e.message ? e.message : "Das hat nicht geklappt."} Du kannst weiterhin von Hand eintragen.`; start(); }
+        if (!z.length) { meld.textContent = "Auf dem Foto wurde nichts Essbares erkannt. Versuche es mit einem anderen Foto oder trage von Hand ein."; hinweis.hidden = false; start(); return; }
+        meld.textContent = ""; hinweis.hidden = false; await pruefen(z, klein);
+      } catch (e) { fehlerMerken(e); hinweis.hidden = false; inhalt.replaceChildren(kopf("Foto erkennen", zurueck), ort, meld, hinweis, datei); meld.textContent = `${e && e.message ? e.message : "Das hat nicht geklappt."} (${fehlerText(e).slice(0, 160)}) Du kannst weiterhin von Hand eintragen.`; start(); }
     }
     datei.addEventListener("change", async () => {
       const f = datei.files && datei.files[0]; datei.value = ""; if (!f) return;
@@ -4738,7 +4738,7 @@ function eDialog(optionen) {
       const aus = () => { strom.getTracks().forEach((t) => t.stop()); if (scanStopp === aus) scanStopp = null; };
       if (scanStopp) scanStopp(); scanStopp = aus;
       meld.textContent = "Halte das Essen ins Bild und tippe auf Aufnehmen.";
-      ort.replaceChildren(h("div", { class: "kamera" }, video), h("div", { class: "knopf-zeile" },
+      ort.replaceChildren(h("div", { class: "kamera foto" }, video), h("div", { class: "knopf-zeile" },
         h("button", { class: "knopf", type: "button", onclick: () => {
           if (!video.videoWidth) return;
           const c = document.createElement("canvas"); c.width = video.videoWidth; c.height = video.videoHeight; c.getContext("2d").drawImage(video, 0, 0);
@@ -4996,7 +4996,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.10): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.11): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {

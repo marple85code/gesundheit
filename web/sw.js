@@ -1,12 +1,12 @@
 /* Gesundheit - Service Worker: App offline verfügbar, Daten zwischengespeichert (verschlüsselt). */
-const VERSION = "gesundheit-app-1.7.10";
+const VERSION = "gesundheit-app-1.7.11";
 const DATEN = "gesundheit-daten";
 const SCHALE = [
-  "./", "index.html", "style.css?v=1.7.10", "start.js?v=1.7.10", "app.js?v=1.7.10", "ios-heute.js?v=1.7.10", "teilen.js?v=1.7.10", "manifest.webmanifest",
+  "./", "index.html", "style.css?v=1.7.11", "start.js?v=1.7.11", "app.js?v=1.7.11", "ios-heute.js?v=1.7.11", "teilen.js?v=1.7.11", "manifest.webmanifest",
   "vendor/echarts.min.js", "vendor/bls.json", "vendor/zxing.min.js", "vendor/swiss.json", "fonts/atkinson-next-latin.woff2", "fonts/atkinson-next-latin-ext.woff2",
   "icons/favicon-64.png", "icons/icon-180.png", "icons/icon-512.png", "icons/icon-192.png",
   // Arztbericht: auch ohne Netz erstellbar
-  "bericht.js?v=1.7.10", "vendor/jspdf.umd.min.js", "vendor/jspdf.plugin.autotable.min.js",
+  "bericht.js?v=1.7.11", "vendor/jspdf.umd.min.js", "vendor/jspdf.plugin.autotable.min.js",
   "fonts/atkinson-next-regular.ttf", "fonts/atkinson-next-bold.ttf",
 ];
 

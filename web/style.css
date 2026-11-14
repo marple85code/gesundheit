@@ -974,3 +974,7 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .auffaellig span { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #ff9f0a; }
 .auffaellig b { display: block; font-size: 16px; margin: 3px 0 2px; }
 .auffaellig p { margin: 0; font-size: 14px; color: var(--tinte-2); }
+
+.e-dialog .kamera.foto { aspect-ratio: 3 / 4; max-height: 68vh; margin-top: 8px; }
+.kamera.foto::after { display: none; }
+.kamera.foto video { object-fit: cover; }
