@@ -901,3 +901,5 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .e-v-makros i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
 .e-dialog .e-feld { margin: 10px 0; }
 .e-link { background: none; border: 0; padding: 0; color: var(--akzent, #0a84ff); font: inherit; text-decoration: underline; cursor: pointer; }
+.e-dialog .kamera { margin-top: 8px; aspect-ratio: 4 / 3; max-height: 55vh; }
+.e-dialog .kamera::after { inset: 25% 8%; border-radius: 12px; }

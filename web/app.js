@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.1";
+const APP_VERSION = "1.4.2";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4163,6 +4163,56 @@ async function eOffSuche(text) {
   if (!r.ok) throw new Error(`Open Food Facts antwortet nicht (${r.status})`);
   return ((await r.json()).products || []).map(eOffLebensmittel).filter(Boolean);
 }
+/** Produkt per Strichcode (EAN) bei Open Food Facts nachschlagen. Gibt null zurück, wenn nichts Passendes gefunden wurde. */
+async function eOffCode(code) {
+  const u = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=code,product_name,product_name_de,generic_name_de,brands,nutriments,serving_size,serving_quantity`;
+  const r = await fetch(u);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`Open Food Facts antwortet nicht (${r.status})`);
+  const j = await r.json();
+  if (!j || j.status === 0 || !j.product) return null;
+  return eOffLebensmittel({ ...j.product, code });
+}
+const E_CODEFORMATE = ["ean_13", "ean_8", "upc_a", "upc_e"];
+/** Kamera starten und Strichcodes suchen. Gibt eine Funktion zum Beenden zurück. Ruft treffer(code) einmal auf. */
+async function eScanStarten(video, treffer, fehler) {
+  let strom;
+  try { strom = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false }); }
+  catch { fehler("Die Kamera ist nicht freigegeben oder nicht vorhanden. Erlaube den Zugriff im Browser oder gib die Nummer unter dem Strichcode ein."); return () => {}; }
+  video.srcObject = strom;
+  await video.play().catch(() => {});
+  let aktiv = true, erkenner = null, zx = null;
+  const stopp = () => { aktiv = false; strom.getTracks().forEach((t) => t.stop()); };
+  if ("BarcodeDetector" in window) { try { erkenner = new BarcodeDetector({ formats: E_CODEFORMATE }); } catch { erkenner = null; } }
+  if (!erkenner) {
+    if (!window.ZXing) await new Promise((ok, f) => { const sk = h("script", { src: "vendor/zxing.min.js" }); sk.onload = ok; sk.onerror = f; document.head.append(sk); }).catch(() => {});
+    if (window.ZXing) {
+      const Z = window.ZXing;
+      const leser = new Z.MultiFormatReader();
+      leser.setHints(new Map([[Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]], [Z.DecodeHintType.TRY_HARDER, true]]));
+      const leinwand = document.createElement("canvas"), ctx = leinwand.getContext("2d", { willReadFrequently: true });
+      zx = () => {
+        if (!video.videoWidth) return null;
+        const f = Math.min(1, 800 / video.videoWidth);
+        leinwand.width = Math.round(video.videoWidth * f); leinwand.height = Math.round(video.videoHeight * f);
+        ctx.drawImage(video, 0, 0, leinwand.width, leinwand.height);
+        try { return leser.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(leinwand)))).getText(); } catch { return null; }
+      };
+    } else { stopp(); fehler("Der Scanner konnte nicht geladen werden. Gib die Nummer unter dem Strichcode ein."); return () => {}; }
+  }
+  const schritt = async () => {
+    if (!aktiv) return;
+    try {
+      let code = null;
+      if (erkenner) { const l = await erkenner.detect(video); if (l.length) code = l[0].rawValue; }
+      else if (zx) code = zx();
+      if (code && /^\d{8,14}$/.test(code)) { stopp(); treffer(code); return; }
+    } catch { /* weiter versuchen */ }
+    setTimeout(schritt, 200);
+  };
+  schritt();
+  return stopp;
+}
 function eZuletzt() {
   const t = eLesen(E_TAGE, {});
   const gesehen = new Set(), liste = [];
@@ -4259,6 +4309,35 @@ function eDialog(optionen) {
       h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: sichern }, "Speichern und weiter")));
   }
 
+  let scanStopp = null;
+  dlg.addEventListener("close", () => { if (scanStopp) { scanStopp(); scanStopp = null; } });
+  function scanAnsicht(vorgabe) {
+    const video = h("video", { playsinline: true, muted: true, autoplay: true });
+    const status = h("p", { class: "e-klein e-status" }, "Halte den Strichcode des Produkts in den Rahmen.");
+    const feld = h("input", { type: "text", inputmode: "numeric", class: "e-suche", placeholder: "Nummer unter dem Strichcode", "aria-label": "Nummer unter dem Strichcode", autocomplete: "off" });
+    const zurueck = () => { if (scanStopp) { scanStopp(); scanStopp = null; } sucheAnsicht(); };
+    const lokalAnlegen = h("div", { class: "knopf-zeile", hidden: true }, h("button", { class: "knopf zweit", type: "button", onclick: () => { if (scanStopp) { scanStopp(); scanStopp = null; } eigenAnsicht(); } }, "Eigenes Lebensmittel anlegen"),
+      h("button", { class: "knopf zweit", type: "button", onclick: () => { lokalAnlegen.hidden = true; starten(); } }, "Erneut scannen"));
+    async function suchen(code) {
+      status.textContent = `Suche ${code} …`; lokalAnlegen.hidden = true;
+      try {
+        const lm = await eOffCode(code);
+        if (lm) { if (scanStopp) { scanStopp(); scanStopp = null; } mengeAnsicht(lm, null); return; }
+        status.textContent = `Zu ${code} gibt es bei Open Food Facts keine Nährwerte. Lege das Produkt selbst an oder scanne erneut.`;
+      } catch { status.textContent = "Online-Suche gerade nicht möglich. Es gilt ein Limit von 15 Abfragen pro Minute."; }
+      lokalAnlegen.hidden = false;
+    }
+    async function starten() {
+      if (scanStopp) scanStopp();
+      status.textContent = "Halte den Strichcode des Produkts in den Rahmen.";
+      scanStopp = await eScanStarten(video, suchen, (m) => { status.textContent = m; });
+    }
+    feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const c = feld.value.replace(/\s/g, ""); if (/^\d{8,14}$/.test(c)) suchen(c); else status.textContent = "Bitte die 8 bis 14 Ziffern unter dem Strichcode eingeben."; } });
+    inhalt.replaceChildren(kopf("Barcode scannen", zurueck), h("div", { class: "kamera" }, video), status, lokalAnlegen,
+      h("div", { class: "e-zeile-oben" }, feld, h("button", { class: "knopf zweit", type: "button", onclick: () => feld.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })) }, "Suchen")));
+    if (vorgabe) suchen(vorgabe); else starten();
+  }
+
   function sucheAnsicht() {
     const feld = h("input", { type: "search", class: "e-suche", placeholder: "Lebensmittel suchen", "aria-label": "Lebensmittel suchen", autocomplete: "off", enterkeyhint: "search" });
     const liste = h("div", { class: "e-liste" });
@@ -4300,11 +4379,11 @@ function eDialog(optionen) {
       zeichnen();
     };
     offKnopf.addEventListener("click", online);
-    feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); online(); } });
+    feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const c = feld.value.replace(/\s/g, ""); if (/^\d{8,14}$/.test(c)) scanAnsicht(c); else online(); } });
     inhalt.replaceChildren(kopf("Hinzufügen"),
       h("div", { class: "e-zeile-oben" }, mahlAuswahl()),
       feld, offKnopf,
-      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen")),
+      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen")),
       status, liste,
       h("p", { class: "e-klein" }, "Quellen: ", h("a", { href: "https://www.blsdb.de", target: "_blank", rel: "noopener" }, "Bundeslebensmittelschlüssel 4.0, Max Rubner-Institut (CC BY 4.0)"),
         " und ", h("a", { href: "https://de.openfoodfacts.org", target: "_blank", rel: "noopener" }, "Open Food Facts"),
