@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.6.4";
+const APP_VERSION = "1.6.5";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1747,7 +1747,7 @@ function auffaelligkeiten(k) {
   return aus;
 }
 function tagesformKarte(k) {
-  const f = null; // Tagesform-Karte auf Wunsch entfernt
+  const f = tagesformRechnen(k, heuteIso());
   const knoten = [];
   if (f) {
     const U = 2 * Math.PI * 48;
@@ -1818,8 +1818,7 @@ async function ansichtHeute() {
   // ---- Kacheln
   const kacheln = [];
   if (!E_STAND.ziel) { try { await eRechnerBauen((r) => { E_STAND.ziel = r; }); } catch { /* Ring zeigt dann „Ziel offen“ */ } }
-  const ringeKachel = eTagesringe(k, heute);
-  if (ringeKachel) kacheln.push(ringeKachel);
+  // Kachel „Heute im Überblick“ auf Wunsch entfernt
   if (bp.length) {
     const woche = bp.filter((m) => m.ts >= Date.now() - 7 * 86400000);
     const mo = woche.filter((m) => istMorgens(m.ts)), ab = woche.filter((m) => !istMorgens(m.ts));
