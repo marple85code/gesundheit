@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.8";
+const APP_VERSION = "1.7.9";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4708,14 +4708,12 @@ function eDialog(optionen) {
           h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => { const v = keyFeld.value.trim(); if (v.length < 20) { meld.textContent = "Bitte den ganzen Schlüssel einfügen."; return; } speicher.set("gawi.gemini", v); meld.textContent = ""; start(); } }, "Schlüssel speichern")));
         return;
       }
-      ort.replaceChildren(h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => datei.click() }, icon("kamera", 20), "Foto aufnehmen oder wählen")),
+      ort.replaceChildren(h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: kamera }, icon("kamera", 20), "Kamera öffnen"), h("button", { class: "knopf zweit", type: "button", onclick: () => datei.click() }, "Foto auswählen")),
         h("div", { class: "knopf-zeile" }, h("button", { class: "e-link", type: "button", onclick: () => { if (window.confirm("Gespeicherten Schlüssel von diesem Gerät entfernen?")) { speicher.set("gawi.gemini", null); start(); } } }, "Schlüssel entfernen")));
     }
-    datei.addEventListener("change", async () => {
-      const f = datei.files && datei.files[0]; datei.value = ""; if (!f) return;
+    async function auswerten(url) {
       ort.replaceChildren(); meld.textContent = "Foto wird ausgewertet …";
       try {
-        const url = await new Promise((ok, nein) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = nein; fr.readAsDataURL(f); });
         const img = await new Promise((ok, nein) => { const i = new Image(); i.onload = () => ok(i); i.onerror = nein; i.src = url; });
         const k = Math.min(1, 1024 / Math.max(img.width, img.height));
         const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
@@ -4725,8 +4723,30 @@ function eDialog(optionen) {
         if (!z.length) { meld.textContent = "Auf dem Foto wurde nichts Essbares erkannt. Versuche es mit einem anderen Foto oder trage von Hand ein."; start(); return; }
         meld.textContent = ""; pruefen(z, klein);
       } catch (e) { meld.textContent = `${e && e.message ? e.message : "Das hat nicht geklappt."} Du kannst weiterhin von Hand eintragen.`; start(); }
+    }
+    datei.addEventListener("change", async () => {
+      const f = datei.files && datei.files[0]; datei.value = ""; if (!f) return;
+      const url = await new Promise((ok, nein) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = nein; fr.readAsDataURL(f); });
+      auswerten(url);
     });
-    inhalt.replaceChildren(kopf("Foto erkennen", zurueck), ort, meld, hinweis, datei);
+    async function kamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { meld.textContent = "Die Kamera ist hier nicht verfügbar. Wähle stattdessen ein Foto aus."; return; }
+      let strom;
+      try { strom = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1600 } }, audio: false }); }
+      catch { meld.textContent = "Kein Zugriff auf die Kamera. Erlaube sie in den Browser-Einstellungen oder wähle ein Foto aus."; return; }
+      const video = h("video", { playsinline: true, muted: true, autoplay: true }); video.srcObject = strom;
+      const aus = () => { strom.getTracks().forEach((t) => t.stop()); if (scanStopp === aus) scanStopp = null; };
+      if (scanStopp) scanStopp(); scanStopp = aus;
+      meld.textContent = "Halte das Essen ins Bild und tippe auf Aufnehmen.";
+      ort.replaceChildren(h("div", { class: "kamera" }, video), h("div", { class: "knopf-zeile" },
+        h("button", { class: "knopf", type: "button", onclick: () => {
+          if (!video.videoWidth) return;
+          const c = document.createElement("canvas"); c.width = video.videoWidth; c.height = video.videoHeight; c.getContext("2d").drawImage(video, 0, 0);
+          const url = c.toDataURL("image/jpeg", 0.9); aus(); auswerten(url);
+        } }, "Aufnehmen"),
+        h("button", { class: "knopf zweit", type: "button", onclick: () => { aus(); meld.textContent = ""; start(); } }, "Abbrechen")));
+    }
+    inhalt.replaceChildren(kopf("Foto erkennen", () => { if (scanStopp) { scanStopp(); scanStopp = null; } zurueck(); }), ort, meld, hinweis, datei);
     start();
   }
   async function pruefen(zutaten, bild) {
@@ -4976,7 +4996,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.8): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.9): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
