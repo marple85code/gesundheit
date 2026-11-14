@@ -76,16 +76,16 @@ body.ios-skin .stand {
 /* Handy: Titel bekommt Platz in der ersten Zeile (nicht abgeschnitten), Status und Knöpfe rücken
    darunter; der Name bleibt neben dem Avatar sichtbar und wird nur bei Platzmangel gekürzt. */
 @media (max-width: 640px) {
-  /* Zeile 1: Status, Sync, Menü rechts oben in der Ecke. Zeile 2: Begrüßung links, Profilbild rechts. */
+  /* Zeile 1: Status links, Profilbild rechts oben. Zeile 2: Begrüßung links, Sync und Menü rechts unter dem Profilbild. */
   body.ios-skin .kopf { flex-wrap: wrap; row-gap: 10px; align-items: center; }
   body.ios-skin .kopf .kopf-zurueck { order: 0; }
-  body.ios-skin .kopf .stand { order: 1; margin-left: auto; }
-  body.ios-skin .kopf .sync-knopf { order: 2; }
-  body.ios-skin .kopf .menue-knopf { order: 3; }
-  body.ios-skin .kopf::after { content: ""; order: 4; flex: 0 0 100%; height: 0; }
-  body.ios-skin .kopf .kopf-titel { order: 5; flex: 1 1 0; min-width: 0; }
-  body.ios-skin .kopf .ios-profil { order: 6; margin-left: auto; }
-  body.ios-skin .kopf.startseite h1 { font-size: clamp(24px, 7.2vw, 32px); line-height: 1.15; }
+  body.ios-skin .kopf .stand { order: 1; }
+  body.ios-skin .kopf .ios-profil { order: 2; margin-left: auto; }
+  body.ios-skin .kopf::after { content: ""; order: 3; flex: 0 0 100%; height: 0; }
+  body.ios-skin .kopf .kopf-titel { order: 4; flex: 1 1 0; min-width: 0; }
+  body.ios-skin .kopf .sync-knopf { order: 5; }
+  body.ios-skin .kopf .menue-knopf { order: 6; }
+  body.ios-skin .kopf.startseite h1 { font-size: clamp(22px, 6.6vw, 30px); line-height: 1.15; }
 }
 .ios-avatar {
   width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
