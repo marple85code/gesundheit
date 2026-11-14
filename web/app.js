@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.4";
+const APP_VERSION = "1.7.5";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1820,6 +1820,19 @@ async function ansichtHeute() {
   const kacheln = [];
   if (!E_STAND.ziel) { try { await eRechnerBauen((r) => { E_STAND.ziel = r; }); } catch { /* Ring zeigt dann „Ziel offen“ */ } }
   // Kachel „Heute im Überblick“ auf Wunsch entfernt
+  {
+    const ziele = eLesen(A_ZIELE, []);
+    const wsH = wocheStart(heute), minW = akt.filter((a_) => String(a_.start).slice(0, 10) >= wsH).reduce((x, a_) => x + (a_.dauer || 0) / 60, 0);
+    const zeilenZ = ziele.map((z) => {
+      let anteil = 0, text = "";
+      if (z.art === "gewicht") { const ist = gLetzt ? gLetzt[1] : null; anteil = ist != null && z.start !== z.ziel ? (z.start - ist) / (z.start - z.ziel) : 0; text = ist != null ? `${zahl(ist, 1)} / ${zahl(z.ziel, 1)} kg` : `Ziel ${zahl(z.ziel, 1)} kg`; }
+      else { anteil = minW / z.ziel; text = `${zahl(Math.round(minW))} / ${zahl(z.ziel)} Min.`; }
+      anteil = Math.max(0, Math.min(1, anteil));
+      return h("div", { style: { margin: "6px 0" } }, h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: "13px" } }, h("span", null, z.art === "gewicht" ? "Gewicht" : "Sport pro Woche"), h("b", null, text)),
+        h("div", { class: "form-balken" }, h("i", { style: { width: `${Math.round(anteil * 100)}%`, background: anteil >= 1 ? "#34c759" : "#0a84ff" } })));
+    });
+    kacheln.push(kachel({ titel: "Ziele", link: "#auswertung", extra: ziele.length ? h("div", null, ...zeilenZ) : null, unter: ziele.length ? "" : "Ziel festlegen" }));
+  }
   if (bp.length) {
     const woche = bp.filter((m) => m.ts >= Date.now() - 7 * 86400000);
     const mo = woche.filter((m) => istMorgens(m.ts)), ab = woche.filter((m) => !istMorgens(m.ts));
@@ -4866,7 +4879,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.4): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.5): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
