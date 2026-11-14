@@ -147,6 +147,18 @@
       werte.forEach((w, i) => { const x = 70 + (i % 3) * 330, y = H - hStat + 100 + Math.floor(i / 3) * z;
         text(c, (w.l + (w.e ? " " + w.e : "")).toUpperCase(), x, y - 60, 25, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 }); text(c, w.v, x, y + 30, 90, { schrift: SCHMAL, kursiv: true, gewicht: 800 }); });
     },
+    woche(c, W, H, d, bg, glas) {
+      if (glas) { hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 1, 0.15, 0.3); } else topoIos(c, W, H);
+      const fa = [["#0a84ff"], ["#30d158"], ["#ff9f0a"], ["#5e5ce6"], ["#ff3b30"], ["#64d2ff"]];
+      text(c, d.datum.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: glas ? "rgba(255,255,255,.8)" : "#8e8e93", spur: 3 });
+      text(c, d.titel, 60, 215, 76, { schrift: SCHMAL, gewicht: 700 }); logo(c, W - 156, 70, 96);
+      const ws = d.werte.slice(0, 6), top = 300, platz = H - top - 60, zh = Math.min(200, platz / Math.max(1, ws.length));
+      c.fillStyle = glas ? "rgba(18,20,26,.66)" : "rgba(44,44,46,.92)"; rundRechteck(c, 20, top - 30, W - 40, zh * ws.length + 60, 48); c.fill();
+      ws.forEach((w, i) => { const y = top + i * zh + zh * 0.62;
+        text(c, (w.l || "").toUpperCase(), 70, y - zh * 0.34, 26, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 });
+        text(c, w.v + (w.e ? " " + w.e : ""), 70, y + zh * 0.12, Math.min(96, zh * 0.5), { schrift: SCHMAL, gewicht: 700, farbe: fa[i % 6][0] });
+        if (w.n) text(c, w.n, W - 70, y + zh * 0.1, 34, { schrift: SCHMAL, farbe: "#8e8e93", ausrichtung: "right" }); });
+    },
     suunto(c, W, H, d) {
       topoIos(c, W, H);
       text(c, `${d.datum}`.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: "#8e8e93", spur: 3 }); text(c, d.titel, 60, 205, 70, { schrift: SCHMAL, gewicht: 700, farbe: "#fff" }); logo(c, W - 156, 90, 96);
@@ -172,7 +184,7 @@
     const [W, H] = GROESSEN[groesse]; canvas.width = W; canvas.height = H;
     const c = canvas.getContext("2d"); c.clearRect(0, 0, W, H);
     const F = 210, HI = H - F, tmp = document.createElement("canvas"); tmp.width = W; tmp.height = HI;
-    ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
+    if (daten.werte) ZEICHNEN.woche(tmp.getContext("2d"), W, HI, daten, bg, layout === "glas"); else ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
     c.drawImage(tmp, 0, 0);
     const g = c.createLinearGradient(0, HI, 0, H); g.addColorStop(0, "#0b0b0f"); g.addColorStop(1, "#000"); c.fillStyle = g; c.fillRect(0, HI, W, F);
     const s = 76, fy = HI + 26;
