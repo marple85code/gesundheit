@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.5.1";
+const APP_VERSION = "1.5.2";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4317,11 +4317,15 @@ function eDialog(optionen) {
   let mahl = optionen.mahl || "f";
   const inhalt = h("div", { class: "dialog-inhalt" });
   dlg.append(inhalt);
-  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  let entwurf = null;
+  const hatInhalt = () => !!entwurf && !!(entwurf.name || entwurf.zutaten.length || entwurf.foto);
+  const verwerfenOk = () => !hatInhalt() || window.confirm("Gericht verwerfen? Deine Eingaben gehen verloren.");
+  dlg.addEventListener("click", (e) => { if (e.target === dlg && !entwurf) dlg.close(); });
+  dlg.addEventListener("cancel", (e) => { if (entwurf) e.preventDefault(); });
   dlg.addEventListener("close", () => { dlg.remove(); });
   const kopf = (titel, zurueck) => h("div", { class: "dialog-kopf" },
     zurueck ? h("button", { class: "dialog-zu", type: "button", "aria-label": "Zurück", onclick: zurueck }, icon("zurueck", 20)) : null,
-    h("h2", null, titel), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: () => dlg.close() }, icon("zu", 20)));
+    h("h2", null, titel), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: () => { if (verwerfenOk()) dlg.close(); } }, icon("zu", 20)));
   const mahlAuswahl = () => {
     const sel = h("select", { "aria-label": "Mahlzeit" }, E_MAHL.map(([id, n]) => h("option", { value: id, selected: id === mahl ? true : null }, n)));
     sel.addEventListener("change", () => { mahl = sel.value; });
@@ -4394,7 +4398,7 @@ function eDialog(optionen) {
       h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: sichern }, "Speichern und weiter")));
   }
 
-  let scanStopp = null, zutatRueck = null, entwurf = null;
+  let scanStopp = null, zutatRueck = null;
   dlg.addEventListener("close", () => { zutatRueck = null; entwurf = null; if (scanStopp) { scanStopp(); scanStopp = null; } });
   function scanAnsicht(vorgabe) {
     const video = h("video", { playsinline: true, muted: true, autoplay: true });
@@ -4480,7 +4484,7 @@ function eDialog(optionen) {
       speicher.set(E_GERICHTE, JSON.stringify(eLesen(E_GERICHTE, []).filter((x) => x.id !== d.id)));
       eGerichteGeaendert(); entwurf = null; gerichteAnsicht();
     };
-    inhalt.replaceChildren(kopf(istNeu ? "Neues Gericht" : "Gericht bearbeiten", () => { entwurf = null; gerichteAnsicht(); }),
+    inhalt.replaceChildren(kopf(istNeu ? "Neues Gericht" : "Gericht bearbeiten", () => { if (!verwerfenOk()) return; entwurf = null; gerichteAnsicht(); }),
       h("div", { class: "e-g-kopf" }, bild, h("button", { type: "button", class: "knopf zweit", onclick: () => datei.click() }, icon("kamera", 18), d.foto ? "Foto ändern" : "Foto hinzufügen"), datei),
       name,
       h("label", { class: "e-feld" }, h("span", null, "Ergibt"), h("div", { class: "e-zahl" }, portionen, h("small", null, "Portionen"))),
@@ -4560,7 +4564,7 @@ function eDialog(optionen) {
   if (optionen.eintrag) {
     const e = optionen.eintrag;
     mengeAnsicht({ name: e.name, marke: e.marke, l: e.l, quelle: e.quelle, portion: e.portion }, e);
-  } else sucheAnsicht();
+  } else if (optionen.gericht) { gerichteAnsicht(); entwurf = null; gerichtEditor(null); } else sucheAnsicht();
   dlg.showModal();
 }
 
@@ -4625,14 +4629,15 @@ async function ansichtEssen() {
   eAbgleichPlanen(300);
   const geoeffnet = speicher.get("gesundheit.klapp.rechner");
   if (geoeffnet == null && !E_STAND.ziel) speicher.set("gesundheit.klapp.rechner", "1");
-  return { titel: "Ernährung", knoten: [tagBox, klappAbschnitt("rechner", "Kalorienziel berechnen", "Größe, Alter, Bewegung und Ziel", ...rechner)] };
+  return { titel: "Ernährung", aktion: { text: "Gericht erstellen", icon: "plus", fn: () => eDialog({ tag: E_STAND.tag, gericht: true, fertig: () => eTagBauen(tagBox, E_STAND.tag) }) },
+    knoten: [tagBox, klappAbschnitt("rechner", "Kalorienziel berechnen", "Größe, Alter, Bewegung und Ziel", ...rechner)] };
 }
 
 const NAV = [["essen", "Essen"], ["heute", "Heute"], ["koerper", "Körper"], ["herz", "Herz"], ["schlaf", "Schlaf"], ["sport", "Sport"], ["hinweise", "Hinweise"]];
 const MEHR = [["bericht", "Arztbericht (PDF)", "Alle wichtigen Werte für die Ärztin oder den Arzt"], ["tag", "Tag im Detail", "Puls, Stress, Body Battery und Schlaf eines Tages"], ["werte", "Alle Werte", "Jede Messgröße einzeln, mit Rohdaten"], ["status", "Status", "Abrufe, Verbindung und Darstellung"]];
 const ANSICHTEN = { essen: ansichtEssen, heute: ansichtHeute, koerper: ansichtKoerper, herz: ansichtHerz, schlaf: ansichtSchlaf, sport: ansichtSport, hinweise: ansichtHinweise,
   tag: ansichtTag, werte: ansichtWerte, status: ansichtStatus, aktivitaet: ansichtAktivitaet, ekg: ansichtEkg, bericht: ansichtBericht };
-let MAIN, KOPF_TITEL, KOPF_ZURUECK, KOPF, STAND, DIALOG, SYNC_KNOPF, SYNC_MELDUNG;
+let MAIN, KOPF_AKTION, KOPF_TITEL, KOPF_ZURUECK, KOPF, STAND, DIALOG, SYNC_KNOPF, SYNC_MELDUNG;
 let LAUF = 0;
 
 function geruestBauen() {
@@ -4642,7 +4647,8 @@ function geruestBauen() {
   STAND = h("a", { class: "stand", href: "#status" });
   const menueKnopf = h("button", { class: "menue-knopf", type: "button", "aria-label": "Mehr" }, icon("mehr"));
   SYNC_KNOPF = h("button", { class: "sync-knopf", type: "button", "aria-label": "Jetzt abrufen", title: "Jetzt abrufen", onclick: () => Sync.starten() }, icon("sync"), h("span", { class: "sync-punkt", "aria-hidden": "true" }));
-  KOPF = h("header", { class: "kopf" }, KOPF_ZURUECK, KOPF_TITEL, STAND, SYNC_KNOPF, menueKnopf);
+  KOPF_AKTION = h("button", { class: "kopf-aktion", type: "button", hidden: true });
+  KOPF = h("header", { class: "kopf" }, KOPF_ZURUECK, KOPF_TITEL, KOPF_AKTION, STAND, SYNC_KNOPF, menueKnopf);
   SYNC_MELDUNG = h("div", { class: "sync-meldung", role: "status", "aria-live": "polite", hidden: true });
   MAIN = h("main", { class: "seite", id: "inhalt" });
   const navLink = ([id, name]) => h("a", { href: `#${id}`, "data-ziel": id }, icon(id), h("span", null, name),
@@ -4700,6 +4706,8 @@ async function route() {
   document.documentElement.classList.remove("karte-offen");
   KOPF_TITEL.textContent = ergebnis.titel;
   document.title = ergebnis.titel === "Heute" ? "Gesundheit" : `${ergebnis.titel} – Gesundheit`;
+  KOPF_AKTION.hidden = !ergebnis.aktion;
+  if (ergebnis.aktion) { KOPF_AKTION.onclick = ergebnis.aktion.fn; KOPF_AKTION.setAttribute("aria-label", ergebnis.aktion.text); KOPF_AKTION.replaceChildren(h("span", { class: "ka-plus" }, "+"), h("span", { class: "ka-text" }, ergebnis.aktion.text)); }
   KOPF_ZURUECK.hidden = !ergebnis.zurueck;
   if (ergebnis.zurueck) KOPF_ZURUECK.href = ergebnis.zurueck;
   KOPF.classList.toggle("startseite", ansicht === "heute"); // Versionsnummer am Handy nur auf der Startseite

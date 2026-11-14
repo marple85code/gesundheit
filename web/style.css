@@ -934,3 +934,7 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .e-z-kcal { font-size: 12.5px; color: var(--tinte-3); white-space: nowrap; min-width: 58px; text-align: right; }
 .e-g-summe { margin: 10px 0; }
 .e-ballast { margin-top: 8px; font-size: 12.5px; color: var(--tinte-3); }
+.kopf-aktion { flex: none; display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; background: #0a84ff; color: #fff; font: inherit; font-size: 14px; font-weight: 600; padding: 7px 12px; cursor: pointer; white-space: nowrap; }
+.kopf-aktion[hidden] { display: none; }
+.kopf-aktion .ka-plus { font-size: 18px; line-height: 1; }
+@media (max-width: 520px) { .kopf-aktion { padding: 0; width: 34px; height: 34px; justify-content: center; } .kopf-aktion .ka-text { display: none; } .kopf-aktion .ka-plus { font-size: 22px; } }
