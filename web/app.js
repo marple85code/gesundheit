@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.2";
+const APP_VERSION = "1.7.3";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4866,7 +4866,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.2): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.3): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -4884,6 +4884,19 @@ function mitTeilen(karte, titel, werte) {
   const d = heuteIso();
   karte.append(h("button", { type: "button", class: "knopf zweit", style: { marginTop: "10px" }, onclick: () => teilenOeffnen({ titel, datum: datum(d, "langJahr"), datumIso: d, werte }) }, icon("teilen", 18), "Teilen"));
   return karte;
+}
+function formular(titel, felder, ok) {
+  const dlg = h("dialog", { class: "blatt-dialog", "aria-label": titel });
+  const felderEl = felder.map((f) => {
+    const eing = f.optionen ? h("select", { id: `fo-${f.id}` }, f.optionen.map(([v, n]) => h("option", { value: v, selected: v === f.wert }, n)))
+      : h("input", { id: `fo-${f.id}`, type: f.typ || "text", value: f.wert ?? "", inputmode: f.typ === "number" ? "decimal" : null, step: "any", placeholder: f.hilfe || "" });
+    return h("label", { style: { display: "block", margin: "12px 0" } }, h("span", { style: { display: "block", fontSize: "13px", opacity: 0.7, marginBottom: "4px" } }, f.label), eing);
+  });
+  const lesen = () => Object.fromEntries(felder.map((f) => [f.id, document.getElementById(`fo-${f.id}`).value]));
+  dlg.append(h("div", { class: "dialog-inhalt" }, h("div", { class: "dialog-kopf" }, h("h2", null, titel), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: () => dlg.close() }, icon("zu", 20))),
+    ...felderEl, h("div", { class: "knopf-zeile" }, h("button", { type: "button", class: "knopf", onclick: () => { ok(lesen()); dlg.close(); } }, "Speichern"), h("button", { type: "button", class: "knopf zweit", onclick: () => dlg.close() }, "Abbrechen"))));
+  dlg.addEventListener("close", () => dlg.remove()); dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  document.body.append(dlg); dlg.showModal();
 }
 function kart(titel, ...inhalt) { return h("section", { class: "form-karte" }, h("div", { class: "form-kopf" }, h("div", null, h("span", { class: "form-titel" }, titel))), ...inhalt); }
 function zeile(a, b, farbe) { return h("div", { style: { display: "flex", justifyContent: "space-between", padding: "5px 0", gap: "12px" } }, h("span", null, a), h("b", { style: farbe ? { color: farbe } : {} }, b)); }
@@ -4935,24 +4948,25 @@ async function ansichtAuswertung() {
   // ---- Sportprognose (alle Aktivitäten)
   {
     const wochen = [];
-    for (let i = 8; i >= 1; i--) { const v = isoDatum(new Date(tagMs(ws) - i * 7 * 86400000)), b = isoDatum(new Date(tagMs(ws) - (i - 1) * 7 * 86400000)); const l = akt.filter((a_) => inWoche(a_, v, b));
+    for (let i = 12; i >= 1; i--) { const v = isoDatum(new Date(tagMs(ws) - i * 7 * 86400000)), b = isoDatum(new Date(tagMs(ws) - (i - 1) * 7 * 86400000)); const l = akt.filter((a_) => inWoche(a_, v, b));
       wochen.push({ v, min: l.reduce((x, a_) => x + (a_.dauer || 0) / 60, 0), km: l.reduce((x, a_) => x + (a_.distanz || 0) / 1000, 0), kcal: l.reduce((x, a_) => x + (a_.kcal || 0), 0), n: l.length }); }
     const aktiv = wochen.filter((x) => x.n > 0);
-    if (aktiv.length >= 3) {
+    if (aktiv.length < 2) knoten.push(kart("Sportprognose", h("p", null, "Noch zu wenig Aktivitäten in den letzten 12 Wochen für eine Prognose. Sobald in mindestens 2 Wochen Training vorliegt, erscheint sie hier.")));
+    else {
       const rg = regression(wochen.map((x, i) => [i, x.min])), basis = mittel(wochen.slice(-4).map((x) => x.min));
-      const proj = (j) => Math.max(0, Math.min(basis * 1.6, rg ? rg.m * (8 + j) + rg.c : basis));
+      const proj = (j) => Math.max(0, Math.min(basis * 1.6, rg ? rg.m * (12 + j) + rg.c : basis));
       const naech = [0, 1, 2, 3].map(proj), summe = naech.reduce((x, y) => x + y, 0);
       const schnitt = (f) => mittel(wochen.slice(-4).map(f)), nSchnitt = schnitt((x) => x.n);
       const kmS = schnitt((x) => x.km), kcalS = schnitt((x) => x.kcal);
       const trend = rg ? rg.m : 0, trendText = Math.abs(trend) < 3 ? "gleichbleibend" : trend > 0 ? `steigend (+${zahl(Math.round(trend))} Min. pro Woche)` : `fallend (−${zahl(Math.round(-trend))} Min. pro Woche)`;
       const alle = [...wochen.map((x) => x.min), ...naech], max = Math.max(...alle, 1);
       const bw = 300 / alle.length, svg = s("svg", { viewBox: "0 0 300 70", width: "100%", height: 70, role: "img", "aria-label": "Trainingsminuten pro Woche mit Prognose" },
-        ...alle.map((v, i) => s("rect", { x: i * bw + 2, y: 66 - (v / max) * 62, width: bw - 4, height: Math.max(1, (v / max) * 62), rx: 3, fill: i < 8 ? "#0a84ff" : "#0a84ff", opacity: i < 8 ? 1 : 0.38 })));
+        ...alle.map((v, i) => s("rect", { x: i * bw + 2, y: 66 - (v / max) * 62, width: bw - 4, height: Math.max(1, (v / max) * 62), rx: 3, fill: "#0a84ff", opacity: i < 12 ? 1 : 0.38 })));
       const proTyp = new Map(); for (const a_ of akt.filter((x) => String(x.start).slice(0, 10) >= isoMinus(56))) { const n = sportName(a_.typ); proTyp.set(n, (proTyp.get(n) || 0) + (a_.dauer || 0) / 60); }
       const typen = [...proTyp.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4), gesamt = [...proTyp.values()].reduce((x, y) => x + y, 0) || 1;
       knoten.push(mitTeilen(kart("Sportprognose",
         h("b", { style: { fontSize: "28px" } }, `${zahl(Math.round(summe))} Min.`),
-        h("p", null, `Voraussichtlich in den nächsten 4 Wochen, Trend ${trendText}. Gerechnet aus allen Aktivitäten der letzten 8 Wochen, helle Balken sind die Prognose.`),
+        h("p", null, `Voraussichtlich in den nächsten 4 Wochen, Trend ${trendText}. Gerechnet aus allen Aktivitäten der letzten 12 Wochen, helle Balken sind die Prognose.`),
         svg,
         zeile("Ø Aktivitäten pro Woche", zahl(nSchnitt, 1)), zeile("Ø Trainingszeit pro Woche", `${zahl(Math.round(basis))} Min.`),
         kmS ? zeile("Ø Distanz pro Woche", `${zahl(kmS, 1)} km`) : null, kcalS ? zeile("Ø Kalorien pro Woche", `${zahl(Math.round(kcalS))} kcal`) : null,
@@ -4981,7 +4995,7 @@ async function ansichtAuswertung() {
     const l = akt.filter((a_) => sportIcon(a_.typ) === gruppe && a_.distanz);
     if (l.length) { const a_ = l.reduce((x, y) => (y.distanz > x.distanz ? y : x)); best.push([name, `${zahl(a_.distanz / 1000, 1)} km · ${datum(String(a_.start).slice(0, 10), "kurz")}`]); }
   }
-  const hm = akt.filter((a_) => a_.auf); if (hm.length) { const a_ = hm.reduce((x, y) => (y.auf > x.auf ? y : x)); best.push(["Meiste Höhenmeter", `${zahl(Math.round(a_.auf))} m · ${datum(String(a_.start).slice(0, 10), "kurz")}`]); }
+  const hm = akt.filter((a_) => a_.auf && a_.auf < 9000); if (hm.length) { const a_ = hm.reduce((x, y) => (y.auf > x.auf ? y : x)); best.push(["Meiste Höhenmeter", `${zahl(Math.round(a_.auf))} m · ${datum(String(a_.start).slice(0, 10), "kurz")}`]); }
   const wochenMit = new Set(akt.map((a_) => wocheStart(String(a_.start).slice(0, 10))));
   let serie = 0; { let d = ws; if (!wochenMit.has(d)) d = isoDatum(new Date(tagMs(d) - 7 * 86400000)); while (wochenMit.has(d)) { serie++; d = isoDatum(new Date(tagMs(d) - 7 * 86400000)); } }
   let tageSerie = 0; { const ziel = new Map((k.schrittziel || [])); let d = heute; if (!(amTag(k.schritte, d) >= (amTag(k.schrittziel, d) || Infinity))) d = isoMinus(1); while (amTag(k.schritte, d) != null && amTag(k.schritte, d) >= (ziel.get(d) || 8000)) { tageSerie++; d = isoDatum(new Date(tagMs(d) - 86400000)); } }
@@ -5015,12 +5029,10 @@ async function ansichtAuswertung() {
     h("button", { type: "button", class: "knopf", onclick: () => { ausr.splice(i, 1); speicher.set(A_AUSR, JSON.stringify(ausr)); ausrZeigen(); } }, "Entfernen")); }));
   ausrZeigen();
   knoten.push(kart("Ausrüstung", h("p", null, "Zählt die Kilometer deiner Aktivitäten ab einem Datum, zum Beispiel für Schuhe oder die Kette."), ausrBox,
-    h("button", { type: "button", class: "knopf", onclick: () => {
-      const name = prompt("Name der Ausrüstung, zum Beispiel Laufschuhe"); if (!name) return;
-      const art = (prompt("Sportart: lauf, fahrrad oder wandern", "lauf") || "lauf").trim();
-      const ab = prompt("Ab welchem Datum zählen? (JJJJ-MM-TT)", heute) || heute;
-      const limit = Number(prompt("Warnung bei wie vielen Kilometern? (leer lassen für keine)", "700")) || 0;
-      ausr.push({ name, art: ["lauf", "fahrrad", "wandern"].includes(art) ? art : "lauf", ab, limit }); speicher.set(A_AUSR, JSON.stringify(ausr)); ausrZeigen(); } }, "Ausrüstung hinzufügen")));
+    h("button", { type: "button", class: "knopf", onclick: () => formular("Ausrüstung hinzufügen", [
+      { id: "name", label: "Name", hilfe: "zum Beispiel Laufschuhe" }, { id: "art", label: "Sportart", optionen: [["lauf", "Laufen"], ["fahrrad", "Radfahren"], ["wandern", "Wandern"]], wert: "lauf" },
+      { id: "ab", label: "Zählen ab Datum", typ: "date", wert: heute }, { id: "limit", label: "Warnung bei Kilometern (leer für keine)", typ: "number", wert: "700" }],
+      (v) => { if (!v.name.trim()) return; ausr.push({ name: v.name.trim(), art: v.art, ab: v.ab || heute, limit: Number(v.limit) || 0 }); speicher.set(A_AUSR, JSON.stringify(ausr)); ausrZeigen(); }) }, "Ausrüstung hinzufügen")));
 
   // ---- Blutdruck nach Tageszeit
   const bp = blutdruckMessungen(w).filter((m) => m.ts >= tagMs(isoMinus(90)));
@@ -5069,11 +5081,12 @@ async function ansichtAuswertung() {
       h("div", { class: "form-balken" }, h("i", { style: { width: `${Math.round(anteil * 100)}%`, background: "#34c759" } })), h("p", null, text),
       h("button", { type: "button", class: "knopf", onclick: () => { ziele.splice(i, 1); speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); } }, "Entfernen")); }));
   zZeigen();
-  knoten.push(kart("Ziele", zBox, h("button", { type: "button", class: "knopf", onclick: () => {
-    const art = (prompt("Zieltyp: gewicht oder sport", "gewicht") || "").trim();
-    if (art === "gewicht") { const z = Number((prompt("Zielgewicht in kg") || "").replace(",", ".")); const st = (letzter(wReihe(w, 1)) || [])[1]; if (z && st) { ziele.push({ art, ziel: z, start: st }); } }
-    else if (art === "sport") { const z = Number(prompt("Trainingsminuten pro Woche", "150")); if (z) ziele.push({ art, ziel: z }); }
-    speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); } }, "Ziel hinzufügen")));
+  knoten.push(kart("Ziele", zBox, h("button", { type: "button", class: "knopf", onclick: () => formular("Ziel hinzufügen", [
+    { id: "art", label: "Was möchtest du erreichen?", optionen: [["gewicht", "Zielgewicht in kg"], ["sport", "Sport pro Woche in Minuten"]], wert: "gewicht" },
+    { id: "wert", label: "Zielwert", typ: "number", hilfe: "zum Beispiel 72 oder 150" }],
+    (v) => { const z = Number(String(v.wert).replace(",", ".")); if (!z) return; const st = (letzter(wReihe(w, 1)) || [])[1];
+      if (v.art === "gewicht") { if (!st) return; ziele.push({ art: "gewicht", ziel: z, start: st }); } else ziele.push({ art: "sport", ziel: z });
+      speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); }) }, "Ziel hinzufügen")));
 
   // ---- Sichern
   knoten.push(kart("Eigene Einträge sichern", h("p", null, "Speichert Essenstagebuch, eigene Gerichte, Ziele und Ausrüstung dieses Geräts als Datei. Gesundheitsdaten bleiben verschlüsselt im Online-Speicher und sind davon nicht betroffen."),
