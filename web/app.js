@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.4.1";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -3791,7 +3791,7 @@ const E_FARBE = { protein: "#ff3b30", kh: "#0a84ff", fett: "#ff9f0a" };
 function eProfilLesen() {
   try { return JSON.parse(speicher.get(E_PROFIL) || "{}") || {}; } catch { return {}; }
 }
-function eProfilSchreiben(p) { speicher.set(E_PROFIL, JSON.stringify(p)); }
+function eProfilSchreiben(p) { speicher.set(E_PROFIL, JSON.stringify(p)); eStammGeaendert(); }
 
 /** Reine Rechnung. p: gewicht (kg), groesse (cm), alter, geschlecht ("m"/"w"), pal, ziel, tempo, formel, fettfrei (kg, optional) */
 function eBerechnen(p) {
@@ -3987,12 +3987,125 @@ async function eRechnerBauen(zielMelden) {
 const E_TAGE = "gesundheit.ernaehrung.tage", E_EIGENE = "gesundheit.ernaehrung.eigene";
 const E_MAHL = [["f", "Frühstück"], ["m", "Mittagessen"], ["a", "Abendessen"], ["s", "Snacks"]];
 const E_STAND = { tag: null, ziel: null };
+const E_ZEIT = "gesundheit.ernaehrung.zeit", E_STAMMZ = "gesundheit.ernaehrung.stammzeit", E_OFFEN = "gesundheit.ernaehrung.offen";
+const E_ABG = { laeuft: false, nochmal: false, timer: null, runden: 0, text: "", gesendet: {}, aktualisieren: null };
+function eStatus(text) { E_ABG.text = text; if (E_ABG.aktualisieren) E_ABG.aktualisieren(); }
+function eAbgleichPlanen(ms = 4000) { clearTimeout(E_ABG.timer); E_ABG.timer = setTimeout(() => eAbgleichen().catch(() => {}), ms); }
+function eStammGeaendert() {
+  speicher.set(E_STAMMZ, String(Date.now()));
+  E_ABG.runden = 0;
+  eAbgleichPlanen(4000);
+}
+async function eCloudLesen(pfad) {
+  let r;
+  try { r = await fetch(pfad + "?t=" + Date.now(), { cache: "no-store" }); } catch { return { fehler: true }; }
+  if (r.status === 404) return { leer: true };
+  if (!r.ok) return { fehler: true };
+  try { return { daten: await entschluesseln(pfad, await r.arrayBuffer()) }; } catch { return { fehler: true }; }
+}
+/** Verschlüsselt in die Cloud legen (Ablauf ernaehrung.yml). Gibt true zurück, wenn ein Abruf gestartet wurde. */
+async function ePush(z, pfad, objekt) {
+  const json = JSON.stringify(objekt), alt = E_ABG.gesendet[pfad];
+  if (alt && alt.json === json && Date.now() - alt.zeit < 5 * 60 * 1000) return true;
+  const b64 = b64d(await verschluesselnPaket(pfad, objekt));
+  if (b64.length > 60000) { eStatus("Dieser Monat ist zu groß für den Abgleich und bleibt auf diesem Gerät."); return false; }
+  const name = pfad.replace(/^d\/ernaehrung\//, "").replace(/\.enc$/, "");
+  await Sync.rufe(z, "POST", `/repos/${z.repo}/actions/workflows/ernaehrung.yml/dispatches`, { ref: z.zweig || "main", inputs: { datei: name, inhalt: b64 } });
+  E_ABG.gesendet[pfad] = { json, zeit: Date.now() };
+  return true;
+}
+/** Ein Monat: neuere Tage aus der Cloud übernehmen, neuere lokale Tage hochladen. */
+async function eMonatAbgleichen(z, m) {
+  const pfad = `d/ernaehrung/${m}.enc`;
+  const c = await eCloudLesen(pfad);
+  if (c.fehler) return { fehler: true };
+  const cloud = (c.daten && c.daten.tage) || {};
+  const lokal = eLesen(E_TAGE, {}), zeiten = eLesen(E_ZEIT, {});
+  let neu = false, hoch = false;
+  for (const iso of Object.keys(cloud)) {
+    const cz = cloud[iso].z || 0, lz = iso in lokal ? (zeiten[iso] || 1) : -1;
+    if (cz > lz) { lokal[iso] = cloud[iso].e || []; zeiten[iso] = cz; neu = true; }
+  }
+  const tage = {};
+  for (const iso of Object.keys(lokal)) {
+    if (!iso.startsWith(m)) continue;
+    const lz = zeiten[iso] || 1;
+    tage[iso] = { z: lz, e: lokal[iso] };
+    if (!cloud[iso] || (cloud[iso].z || 0) < lz) hoch = true;
+  }
+  if (neu) { speicher.set(E_TAGE, JSON.stringify(lokal)); speicher.set(E_ZEIT, JSON.stringify(zeiten)); }
+  if (hoch && z) await ePush(z, pfad, { tage });
+  return { neu, hoch };
+}
+/** Eigene Lebensmittel und Rechner-Profil */
+async function eStammAbgleichen(z) {
+  const pfad = "d/ernaehrung/stamm.enc";
+  const c = await eCloudLesen(pfad);
+  if (c.fehler) return { fehler: true };
+  const lz = Number(speicher.get(E_STAMMZ)) || 0, cz = (c.daten && c.daten.z) || 0;
+  if (cz > lz) {
+    speicher.set(E_PROFIL, JSON.stringify(c.daten.profil || {}));
+    speicher.set(E_EIGENE, JSON.stringify(c.daten.eigene || []));
+    speicher.set(E_STAMMZ, String(cz));
+    return { neu: true };
+  }
+  const hatDaten = Object.keys(eLesen(E_PROFIL, {})).length || eLesen(E_EIGENE, []).length;
+  if (lz > cz || (!cz && hatDaten)) {
+    const zeit = lz || Date.now();
+    if (!lz) speicher.set(E_STAMMZ, String(zeit));
+    await ePush(z, pfad, { z: zeit, profil: eLesen(E_PROFIL, {}), eigene: eLesen(E_EIGENE, []) });
+    return { hoch: true };
+  }
+  return {};
+}
+async function eAbgleichen() {
+  if (E_ABG.laeuft) { E_ABG.nochmal = true; return; }
+  E_ABG.laeuft = true;
+  let neu = false, stammNeu = false;
+  try {
+    const z = await Sync.zugang();
+    if (!z) { eStatus("Nur auf diesem Gerät gespeichert (kein Sync-Token eingerichtet)."); return; }
+    eStatus("Gleiche ab …");
+    const jetzt = heuteIso(), vorMonat = isoMinus(31).slice(0, 7);
+    const monate = new Set([jetzt.slice(0, 7), vorMonat, (E_STAND.tag || jetzt).slice(0, 7), ...eLesen(E_OFFEN, [])]);
+    let fehler = false, hoch = false;
+    const offen = new Set(eLesen(E_OFFEN, []));
+    for (const m of monate) {
+      const r = await eMonatAbgleichen(z, m);
+      if (r.fehler) { fehler = true; continue; }
+      if (r.neu) neu = true;
+      if (r.hoch) hoch = true; else offen.delete(m);
+    }
+    const st = await eStammAbgleichen(z);
+    if (st.fehler) fehler = true; else { if (st.neu) stammNeu = true; if (st.hoch) hoch = true; }
+    speicher.set(E_OFFEN, JSON.stringify([...offen]));
+    if (fehler) eStatus("Abgleich nicht möglich. Bist du online? Die Daten bleiben auf diesem Gerät.");
+    else if (hoch || offen.size) {
+      eStatus("Wird auf deine anderen Geräte übertragen. Das dauert 1 bis 2 Minuten.");
+      if (E_ABG.runden++ < 6) eAbgleichPlanen(100000);
+    } else eStatus(`Auf allen Geräten abgeglichen (${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr).`);
+  } catch (e) {
+    eStatus("Abgleich fehlgeschlagen: " + ((e && e.message) || "unbekannter Fehler"));
+  } finally {
+    E_ABG.laeuft = false;
+    if (E_ABG.nochmal) { E_ABG.nochmal = false; eAbgleichPlanen(2000); }
+  }
+  if (neu || stammNeu) document.dispatchEvent(new CustomEvent("gawi:ernaehrung", { detail: { stamm: stammNeu } }));
+}
+document.addEventListener("gawi:ernaehrung", (ev) => {
+  if (location.hash.replace(/^#\/?/, "").split(/[/?]/)[0] !== "essen" || document.querySelector(".dialog-huelle, dialog[open]")) { if (E_ABG.aktualisieren) E_ABG.aktualisieren(); return; }
+  if (ev.detail && ev.detail.stamm) neuZeichnen(); else if (E_ABG.aktualisieren) E_ABG.aktualisieren();
+});
 function eLesen(k, leer) { try { return JSON.parse(speicher.get(k) || "null") || leer; } catch { return leer; } }
 function eTagEintraege(iso) { return eLesen(E_TAGE, {})[iso] || []; }
 function eTagSchreiben(iso, liste) {
   const t = eLesen(E_TAGE, {});
-  if (liste.length) t[iso] = liste; else delete t[iso];
+  t[iso] = liste; // auch leere Tage bleiben als Löschvermerk erhalten, damit Löschungen auf andere Geräte kommen
   speicher.set(E_TAGE, JSON.stringify(t));
+  const z = eLesen(E_ZEIT, {}); z[iso] = Date.now(); speicher.set(E_ZEIT, JSON.stringify(z));
+  const offen = new Set(eLesen(E_OFFEN, [])); offen.add(iso.slice(0, 7)); speicher.set(E_OFFEN, JSON.stringify([...offen]));
+  E_ABG.runden = 0;
+  eAbgleichPlanen(4000);
 }
 const eRund = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d;
 const eNeueId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -4136,6 +4249,7 @@ function eDialog(optionen) {
       const liste = eLesen(E_EIGENE, []);
       liste.unshift(lm);
       speicher.set(E_EIGENE, JSON.stringify(liste.slice(0, 200)));
+      eStammGeaendert();
       mengeAnsicht(lm, null);
     };
     inhalt.replaceChildren(kopf("Eigenes Lebensmittel", () => sucheAnsicht()),
@@ -4228,7 +4342,7 @@ function eTagBauen(box, tag) {
   const liste = eTagEintraege(tag), summe = eSumme(liste), ziel = E_STAND.ziel;
   const heute = heuteIso();
   const label = tag === heute ? "Heute" : tag === isoMinus(1) ? "Gestern" : datum(tag, "lang");
-  const wechsel = (d) => { E_STAND.tag = isoPlus(tag, d); eTagBauen(box, E_STAND.tag); };
+  const wechsel = (d) => { E_STAND.tag = isoPlus(tag, d); eTagBauen(box, E_STAND.tag); eAbgleichPlanen(300); };
   const navi = h("div", { class: "e-tagnavi" },
     h("button", { type: "button", class: "dialog-zu", "aria-label": "Vorheriger Tag", onclick: () => wechsel(-1) }, icon("zurueck", 20)),
     h("b", null, label, tag !== heute ? h("small", null, ` ${datum(tag, "kurz")}`) : null),
@@ -4240,7 +4354,9 @@ function eTagBauen(box, tag) {
     h("div", { class: "e-ziel-zeile" }, eTagRing(summe, ziel), h("div", { class: "e-makros" },
       makro("protein", "Eiweiß", summe.p, ziel && ziel.protein), makro("kh", "Kohlenhydrate", summe.c, ziel && ziel.kh), makro("fett", "Fett", summe.f, ziel && ziel.fett))),
     ziel ? h("p", { class: "e-klein" }, `Gegessen ${zahl(Math.round(summe.kcal))} von ${zahl(ziel.kcal)} kcal. Ballaststoffe ${zahl(Math.round(summe.fb))} von mindestens ${ziel.ballast} g.`)
-      : h("p", { class: "e-klein" }, "Berechne unten dein Kalorienziel, dann zeigt der Ring, wie viel noch übrig ist."));
+      : h("p", { class: "e-klein" }, "Berechne unten dein Kalorienziel, dann zeigt der Ring, wie viel noch übrig ist."),
+    h("p", { class: "e-klein e-sync" }, E_ABG.text || "Abgleich zwischen den Geräten …", " ",
+      h("button", { type: "button", class: "e-link", onclick: () => { E_ABG.runden = 0; eAbgleichen().catch(() => {}); } }, "Jetzt abgleichen")));
   const mahlzeiten = E_MAHL.map(([id, name]) => {
     const l = liste.filter((e) => (e.mahl || "s") === id);
     const kcal = l.reduce((a, e) => a + eWerte(e)[0], 0);
@@ -4263,6 +4379,8 @@ async function ansichtEssen() {
   const rechner = await eRechnerBauen((r) => { E_STAND.ziel = r; if (tagBox.isConnected || tagBox.childNodes.length) eTagBauen(tagBox, E_STAND.tag); });
   E_STAND.tag = E_STAND.tag > heuteIso() ? heuteIso() : E_STAND.tag;
   eTagBauen(tagBox, E_STAND.tag);
+  E_ABG.aktualisieren = () => { if (tagBox.isConnected) eTagBauen(tagBox, E_STAND.tag); };
+  eAbgleichPlanen(300);
   const geoeffnet = speicher.get("gesundheit.klapp.rechner");
   if (geoeffnet == null && !E_STAND.ziel) speicher.set("gesundheit.klapp.rechner", "1");
   return { titel: "Ernährung", knoten: [tagBox, klappAbschnitt("rechner", "Kalorienziel berechnen", "Größe, Alter, Bewegung und Ziel", ...rechner)] };
@@ -4447,6 +4565,8 @@ async function start() {
   await route();
   Sync.fortsetzen();
   Daten.profilAbholen().catch(() => {});
+  eAbgleichPlanen(2500);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) eAbgleichPlanen(1000); });
   // regelmäßig nach neuen Daten sehen
   setInterval(async () => {
     if (document.hidden) return;
@@ -4454,6 +4574,7 @@ async function start() {
     try { await Daten.ladeIndex(); } catch { return; }
     if (Daten.index && Daten.index.stand !== alt) { Daten.cache.clear(); standZeigen(); neuZeichnen(); } else standZeigen();
     Daten.profilAbholen().catch(() => {});
+    eAbgleichPlanen(500);
   }, 10 * 60 * 1000);
 }
 document.addEventListener("DOMContentLoaded", start);

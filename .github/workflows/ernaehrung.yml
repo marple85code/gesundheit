@@ -1,0 +1,103 @@
+# Gesundheits-App: speichert das (im Browser verschlüsselte) Ernährungstagebuch
+# im Zweig "daten" (d/ernaehrung/<Monat>.enc oder stamm.enc) und stellt die Seite danach neu bereit,
+# damit alle Geräte es übernehmen können. Läuft nur auf Zuruf der App (Sync-Token).
+name: Ernährung
+
+on:
+  workflow_dispatch:
+    inputs:
+      datei:
+        description: "Name der Datei: JJJJ-MM oder stamm"
+        required: true
+      inhalt:
+        description: "Verschlüsselter Inhalt (Base64)"
+        required: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: gesundheit
+  cancel-in-progress: false
+
+jobs:
+  speichern:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.bereitstellen.outputs.page_url }}
+    steps:
+      - name: Eingabe prüfen
+        env:
+          DATEI: ${{ inputs.datei }}
+        run: |
+          if ! printf '%s' "$DATEI" | grep -Eq '^(stamm|[0-9]{4}-(0[1-9]|1[0-2]))$'; then
+            echo "Ungueltiger Dateiname"; exit 1
+          fi
+
+      - name: Bisherige Daten holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git clone --quiet --depth 1 --branch daten "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ablage 2>/dev/null; then
+            rm -rf ablage/.git
+          else
+            mkdir -p ablage/d
+          fi
+
+      - name: Tagebuch speichern
+        env:
+          DATEI: ${{ inputs.datei }}
+          INHALT: ${{ inputs.inhalt }}
+        run: |
+          mkdir -p ablage/d/ernaehrung
+          printf '%s' "$INHALT" | base64 -d > "ablage/d/ernaehrung/${DATEI}.enc"
+
+      - name: Daten sichern
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd ablage
+          git init --quiet -b daten
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "Keine Aenderung"; exit 0; fi
+          git commit --quiet -m "Ernaehrung gespeichert"
+          for _ in 1 2 3; do
+            if git push --quiet --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" daten; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Neueste App holen
+        uses: actions/checkout@v7
+
+      - name: Neueste Daten holen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rm -rf ablage
+          if git clone --quiet --depth 1 --branch daten "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ablage 2>/dev/null; then
+            rm -rf ablage/.git
+          else
+            mkdir -p ablage
+          fi
+
+      - name: Seite bauen
+        run: |
+          rm -rf _site
+          cp -r web _site
+          if [ -d ablage/d ]; then cp -r ablage/d _site/d; fi
+
+      - name: Seite hochladen
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Seite veröffentlichen
+        id: bereitstellen
+        uses: actions/deploy-pages@v5
