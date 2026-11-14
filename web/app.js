@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2.15";
+const APP_VERSION = "1.3.0";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -61,6 +61,7 @@ function esc(t) { return String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&am
 function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 const ICON = {
+  essen: '<path d="M7 3v8M4.5 3v5.2a2.5 2.5 0 0 0 5 0V3M7 11v10M17.5 21V3c-2.2 1.2-3.5 3.8-3.5 7v3h3.5"/>',
   heute: '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M5.4 18.6 7 17M17 7l1.6-1.6"/>',
   koerper: '<circle cx="12" cy="4.6" r="2.3"/><path d="M5.2 9.4 12 8l6.8 1.4M12 8v6.6M12 14.6 9 21.2M12 14.6l3 6.6"/>',
   herz: '<path d="M12 20.4s-7.6-4.6-7.6-10.3A4.3 4.3 0 0 1 12 7.5a4.3 4.3 0 0 1 7.6 2.6c0 5.7-7.6 10.3-7.6 10.3Z"/>',
@@ -1668,7 +1669,7 @@ async function ansichtHeute() {
   const von = isoMinus(100);
   const [w, akt, ekgListe] = await Promise.all([Daten.withings(), Daten.aktivitaeten(), Daten.ekg()]);
   const k = await kennzahlen(["schritte", "schrittziel", "ruhepuls", "schlaf_dauer", "schlaf_score", "bb_aktuell", "bb_hoch", "hrv",
-    "bereitschaft", "vo2lauf", "stress"], von);
+    "bereitschaft", "vo2lauf", "stress", "etagen", "im_mod", "im_int", "aktivkcal", "strecke"], von);
   const [hrvText, bereitText] = await Promise.all([Daten.texte("g.hrv.status", isoMinus(10)), Daten.texte("g.bereitschaft.level", isoMinus(10))]);
   const bf = (await befunde()).map;
   const knoten = [];
@@ -1716,6 +1717,8 @@ async function ansichtHeute() {
 
   // ---- Kacheln
   const kacheln = [];
+  const ringeKachel = eTagesringe(k, heute);
+  if (ringeKachel) kacheln.push(ringeKachel);
   if (bp.length) {
     const woche = bp.filter((m) => m.ts >= Date.now() - 7 * 86400000);
     const mo = woche.filter((m) => istMorgens(m.ts)), ab = woche.filter((m) => !istMorgens(m.ts));
@@ -3765,9 +3768,9 @@ const Aktualisierung = {
 // ======================================================================
 // Gerüst, Navigation, Router
 // ======================================================================
-const NAV = [["heute", "Heute"], ["koerper", "Körper"], ["herz", "Herz"], ["schlaf", "Schlaf"], ["sport", "Sport"], ["hinweise", "Hinweise"]];
+const NAV = [["essen", "Essen"], ["heute", "Heute"], ["koerper", "Körper"], ["herz", "Herz"], ["schlaf", "Schlaf"], ["sport", "Sport"], ["hinweise", "Hinweise"]];
 const MEHR = [["bericht", "Arztbericht (PDF)", "Alle wichtigen Werte für die Ärztin oder den Arzt"], ["tag", "Tag im Detail", "Puls, Stress, Body Battery und Schlaf eines Tages"], ["werte", "Alle Werte", "Jede Messgröße einzeln, mit Rohdaten"], ["status", "Status", "Abrufe, Verbindung und Darstellung"]];
-const ANSICHTEN = { heute: ansichtHeute, koerper: ansichtKoerper, herz: ansichtHerz, schlaf: ansichtSchlaf, sport: ansichtSport, hinweise: ansichtHinweise,
+const ANSICHTEN = { essen: ansichtEssen, heute: ansichtHeute, koerper: ansichtKoerper, herz: ansichtHerz, schlaf: ansichtSchlaf, sport: ansichtSport, hinweise: ansichtHinweise,
   tag: ansichtTag, werte: ansichtWerte, status: ansichtStatus, aktivitaet: ansichtAktivitaet, ekg: ansichtEkg, bericht: ansichtBericht };
 let MAIN, KOPF_TITEL, KOPF_ZURUECK, KOPF, STAND, DIALOG, SYNC_KNOPF, SYNC_MELDUNG;
 let LAUF = 0;

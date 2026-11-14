@@ -248,7 +248,7 @@ body.ios-skin .bericht-link, body.ios-skin .hinweis {
 
 /* ---- Navigation unten (Handy) & links (Chromebook) ---- */
 body.ios-skin .leiste {
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   border-top: .5px solid var(--linie-stark);
   background: color-mix(in srgb, var(--blatt) 88%, transparent);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
@@ -258,9 +258,10 @@ body.ios-skin .leiste a svg { width: 25px; height: 25px; }
 body.ios-skin .leiste a[href="#hinweise"] { display: none; }
 body.ios-skin .leiste a[href="#koerper"] { order: 1; }
 body.ios-skin .leiste a[href="#herz"]    { order: 2; }
-body.ios-skin .leiste a[href="#heute"]   { order: 3; }
-body.ios-skin .leiste a[href="#schlaf"]  { order: 4; }
-body.ios-skin .leiste a[href="#sport"]   { order: 5; }
+body.ios-skin .leiste a[href="#essen"]   { order: 3; }
+body.ios-skin .leiste a[href="#heute"]   { order: 4; }
+body.ios-skin .leiste a[href="#schlaf"]  { order: 5; }
+body.ios-skin .leiste a[href="#sport"]   { order: 6; }
 body.ios-skin .leiste a[aria-current="page"],
 body.ios-skin .leiste a.aktiv,
 body.ios-skin .leiste a.on { color: #007aff; }
