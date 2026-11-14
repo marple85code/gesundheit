@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.9";
+const APP_VERSION = "1.5.0";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4194,6 +4194,15 @@ function eSuchen(liste, text, max = 40) {
     if (t.length === 1 && nz.startsWith(t[0]) && nz.length <= t[0].length + 6) punkte += 2;
     treffer.push([punkte - n.length / 200, x]);
   }
+  if (!treffer.length && t.length > 1) { // nichts mit allen Wörtern: Treffer mit den meisten Wörtern zeigen
+    for (const x of liste) {
+      const n = x.n || (x.n = eNorm(`${x.name} ${x.marke || ""}`));
+      const nz = x.nz || (x.nz = n.replace(/[\s,\/()-]+/g, ""));
+      const woerter = n.split(/[\s,\/()-]+/);
+      const gefunden = t.filter((w) => (w.length < 3 ? woerter.some((y) => y.startsWith(w)) : n.includes(w) || nz.includes(w))).length;
+      if (gefunden >= Math.max(1, t.length - 1) && gefunden >= 2) treffer.push([gefunden * 3 - n.length / 200, x]);
+    }
+  }
   return treffer.sort((a, b) => b[0] - a[0]).slice(0, max).map((x) => x[1]);
 }
 function eOffLebensmittel(p) {
@@ -4207,11 +4216,28 @@ function eOffLebensmittel(p) {
   return { name, marke: String(p.brands || "").split(",")[0].trim(), quelle: "Open Food Facts", code: p.code, portion,
     l: [kcal, n.proteins_100g || 0, n.fat_100g || 0, n.carbohydrates_100g || 0, n.fiber_100g || 0, n.sugars_100g || 0] };
 }
+const E_OFFCACHE = new Map(), E_OFFZEITEN = [];
 async function eOffSuche(text) {
-  const u = `https://de.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(text)}&search_simple=1&action=process&json=1&page_size=25&fields=code,product_name,product_name_de,generic_name_de,brands,nutriments,serving_size,serving_quantity`;
-  const r = await fetch(u);
-  if (!r.ok) throw new Error(`Open Food Facts antwortet nicht (${r.status})`);
-  return ((await r.json()).products || []).map(eOffLebensmittel).filter(Boolean);
+  const schluessel = eNorm(text).trim();
+  if (E_OFFCACHE.has(schluessel)) return E_OFFCACHE.get(schluessel);
+  const jetzt = Date.now();
+  while (E_OFFZEITEN.length && jetzt - E_OFFZEITEN[0] > 60000) E_OFFZEITEN.shift();
+  if (E_OFFZEITEN.length >= 9) throw new Error("Limit");
+  E_OFFZEITEN.push(jetzt);
+  const u = `https://de.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(text)}&search_simple=1&action=process&json=1&page_size=25&fields=code,product_name,product_name_de,generic_name_de,brands,nutriments,serving_size,serving_quantity&sort_by=unique_scans_n`;
+  let liste = null, fehler = null;
+  for (let versuch = 0; versuch < 2 && !liste; versuch++) { // Open Food Facts antwortet gelegentlich leer: einmal wiederholen
+    try {
+      const r = await fetch(u);
+      if (!r.ok) throw new Error(`Open Food Facts antwortet nicht (${r.status})`);
+      liste = (await r.json()).products || [];
+    } catch (e) { fehler = e; }
+  }
+  if (!liste) throw fehler || new Error("Keine Antwort");
+  const gesehen = new Set();
+  const ergebnis = liste.map(eOffLebensmittel).filter(Boolean).filter((x) => { const k = `${eNorm(x.name)}|${eNorm(x.marke)}`; if (gesehen.has(k)) return false; gesehen.add(k); return true; });
+  E_OFFCACHE.set(schluessel, ergebnis);
+  return ergebnis;
 }
 /** Produkt per Strichcode (EAN) bei Open Food Facts nachschlagen. Gibt null zurück, wenn nichts Passendes gefunden wurde. */
 async function eOffCode(code) {
@@ -4471,7 +4497,7 @@ function eDialog(optionen) {
     const liste = h("div", { class: "e-liste" });
     const status = h("p", { class: "e-klein e-status" });
     const offKnopf = h("button", { type: "button", class: "knopf zweit e-off", hidden: true }, "Auch in Open Food Facts suchen (Markenprodukte)");
-    let offTreffer = [], offFehler = "", lokal = [], zaehler = 0;
+    let offTreffer = [], offFehler = "", lokal = [], zaehler = 0, offLaeuft = false, autoTimer = null;
     const waehlen = (lm) => mengeAnsicht(lm, null);
     const gerichte = () => eLesen(E_GERICHTE, []).map(eGerichtLm);
     async function zeichnen() {
@@ -4494,17 +4520,28 @@ function eDialog(optionen) {
       lokal = [...(zutatRueck ? [] : eSuchen(gerichte(), text, 5)), ...eigen, ...eSuchen(bls, text, 40)];
       const alle = [...lokal, ...offTreffer];
       liste.replaceChildren(...alle.map((x) => zeile(x, waehlen)));
-      if (!alle.length) status.textContent = offFehler || "Nichts gefunden. Suche online nach Markenprodukten oder lege das Lebensmittel selbst an.";
+      if (offLaeuft) status.textContent = alle.length ? "Suche online nach Markenprodukten …" : "Suche online nach Markenprodukten …";
+      else if (!alle.length) status.textContent = offFehler || "Nichts gefunden. Suche online nach Markenprodukten oder lege das Lebensmittel selbst an.";
       else status.textContent = offFehler;
     }
     let timer = null;
-    feld.addEventListener("input", () => { offTreffer = []; offFehler = ""; clearTimeout(timer); timer = setTimeout(zeichnen, 120); });
+    feld.addEventListener("input", () => {
+      offTreffer = []; offFehler = ""; offLaeuft = false; clearTimeout(timer); timer = setTimeout(zeichnen, 120);
+      clearTimeout(autoTimer); // Markenprodukte automatisch mitsuchen, sobald du kurz aufhörst zu tippen
+      const t = feld.value.trim();
+      if (t.length >= 3 && !/^\d+$/.test(t)) autoTimer = setTimeout(online, 700);
+    });
     const online = async () => {
       const text = feld.value.trim();
       if (text.length < 2) return;
       offKnopf.disabled = true; offKnopf.textContent = "Suche läuft …";
-      try { offTreffer = await eOffSuche(text); offFehler = offTreffer.length ? "" : "Open Food Facts hat dazu nichts gefunden."; }
-      catch (e) { offTreffer = []; offFehler = "Online-Suche gerade nicht möglich. Es gilt ein Limit von 10 Suchen pro Minute."; }
+      offLaeuft = true; zeichnen();
+      let t = null;
+      try { t = await eOffSuche(text); }
+      catch (e) { t = []; offFehler = e && e.message === "Limit" ? "Zu viele Online-Suchen in einer Minute. Warte kurz und tippe auf den Knopf." : "Online-Suche gerade nicht möglich. Tippe auf den Knopf, um es erneut zu versuchen."; }
+      if (feld.value.trim() !== text) { offLaeuft = false; offKnopf.disabled = false; offKnopf.textContent = "Auch in Open Food Facts suchen (Markenprodukte)"; return; } // inzwischen weitergetippt
+      offTreffer = t; if (t.length) offFehler = ""; else if (!offFehler) offFehler = "Open Food Facts hat dazu nichts gefunden.";
+      offLaeuft = false;
       offKnopf.disabled = false; offKnopf.textContent = "Auch in Open Food Facts suchen (Markenprodukte)";
       zeichnen();
     };
