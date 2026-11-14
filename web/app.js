@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.5.9";
+const APP_VERSION = "1.6.0";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1695,6 +1695,74 @@ async function verlauf({ id, titel = null, name = null, auswahl = null, laden, h
 // ======================================================================
 // Ansicht: Heute
 // ======================================================================
+// ---- Tagesform und Auffälligkeiten (aus den eigenen Werten der letzten Wochen, kein medizinischer Befund)
+function grundlinie(reihe, bis, tage = 60) {
+  const v = (reihe || []).filter((p) => p[0] < bis && p[0] >= isoMinus(tage)).map((p) => p[1]).filter(Number.isFinite);
+  if (v.length < 7) return null;
+  const m = v.reduce((a, b) => a + b, 0) / v.length;
+  const sd = Math.sqrt(v.reduce((a, b) => a + (b - m) * (b - m), 0) / v.length);
+  return { m, sd: Math.max(sd, Math.abs(m) * 0.03, 0.5) };
+}
+function tagesformRechnen(k, heute) {
+  const gestern = isoMinus(1);
+  const teile = [];
+  const frisch = (r) => { const p = letzter(r); return p && p[0] >= gestern ? p : null; };
+  const z = (r, vorzeichen, name, gewicht, einheit, stellen = 0) => {
+    const p = frisch(r); if (!p) return;
+    const g = grundlinie(r, p[0]); if (!g) return;
+    const abw = ((p[1] - g.m) / g.sd) * vorzeichen;
+    teile.push({ name, gewicht, wert: Math.max(0, Math.min(100, 70 + abw * 18)), anzeige: `${zahl(p[1], stellen)} ${einheit}`.trim() });
+  };
+  const sc = frisch(k.schlaf_score);
+  if (sc) teile.push({ name: "Schlaf", gewicht: 0.35, wert: Math.max(0, Math.min(100, sc[1])), anzeige: letzter(k.schlaf_dauer) ? dauer(letzter(k.schlaf_dauer)[1] * 3600, false) + " Std." : `Score ${zahl(sc[1])}` });
+  else z(k.schlaf_dauer, 1, "Schlaf", 0.35, "Std.", 1);
+  z(k.hrv, 1, "HRV", 0.25, "ms");
+  z(k.ruhepuls, -1, "Ruhepuls", 0.2, "bpm");
+  z(k.bb_hoch, 1, "Batterie", 0.2, "");
+  if (teile.length < 2) return null;
+  const sum = teile.reduce((a, t) => a + t.gewicht, 0);
+  const wert = Math.round(teile.reduce((a, t) => a + t.wert * t.gewicht, 0) / sum);
+  const stufe = wert >= 80 ? ["sehr gut erholt", "#34c759", "Heute passen auch intensive Einheiten."]
+    : wert >= 65 ? ["gut erholt", "#34c759", "Heute passt ein lockerer bis zügiger Lauf."]
+    : wert >= 45 ? ["mittel", "#ff9f0a", "Eher locker bleiben und auf ausreichend Schlaf achten."]
+    : ["wenig erholt", "#ff3b30", "Heute lieber Ruhe oder nur leichte Bewegung."];
+  return { wert, teile, wort: stufe[0], farbe: stufe[1], rat: stufe[2] };
+}
+function auffaelligkeiten(k) {
+  const aus = [];
+  const reihe = (r) => (r || []).filter((p) => Number.isFinite(p[1]));
+  const serie = (r, test) => { // Tage in Folge (ab dem letzten Wert), für die test(wert, grundlinie) gilt
+    const l = reihe(r); const g = l.length ? grundlinie(l, l[l.length - 1][0]) : null; if (!g || l[l.length - 1][0] < isoMinus(2)) return null;
+    let n = 0; for (let i = l.length - 1; i >= 0 && test(l[i][1], g); i--) n++;
+    return n >= 3 ? { n, g, mittel: mittel(l.slice(-n).map((p) => p[1])) } : null;
+  };
+  const rp = serie(k.ruhepuls, (v, g) => v >= g.m + Math.max(2, g.sd * 0.75));
+  if (rp) aus.push({ titel: `Ruhepuls seit ${rp.n} Tagen erhöht`, text: `Im Schnitt ${zahl(rp.mittel - rp.g.m, 0)} Schläge über deinem Normalwert von ${zahl(rp.g.m)}. Das kann auf Stress, wenig Schlaf oder einen kommenden Infekt hindeuten.`, link: "#herz" });
+  const hv = serie(k.hrv, (v, g) => v <= g.m - g.sd * 0.75);
+  if (hv) aus.push({ titel: `HRV seit ${hv.n} Nächten niedrig`, text: `Im Schnitt ${zahl(hv.mittel)} ms statt deiner üblichen ${zahl(hv.g.m)} ms. Dein Körper erholt sich gerade schlechter.`, link: "#herz" });
+  const sl = serie(k.schlaf_dauer, (v, g) => v <= Math.min(g.m - 0.5, 6.5));
+  if (sl) aus.push({ titel: `Seit ${sl.n} Nächten wenig Schlaf`, text: `Im Schnitt ${dauer(sl.mittel * 3600, false)} Std. statt deiner üblichen ${dauer(sl.g.m * 3600, false)} Std.`, link: "#schlaf" });
+  const st = serie(k.stress, (v, g) => v >= g.m + Math.max(5, g.sd * 0.75));
+  if (st) aus.push({ titel: `Stress seit ${st.n} Tagen erhöht`, text: `Im Schnitt ${zahl(st.mittel)} statt deiner üblichen ${zahl(st.g.m)}.`, link: "#tag" });
+  return aus;
+}
+function tagesformKarte(k) {
+  const f = tagesformRechnen(k, heuteIso());
+  const knoten = [];
+  if (f) {
+    const U = 2 * Math.PI * 48;
+    const ring = s("svg", { viewBox: "0 0 120 120", width: 112, height: 112, class: "form-ring", role: "img", "aria-label": `Tagesform ${f.wert} von 100` },
+      s("circle", { cx: 60, cy: 60, r: 48, fill: "none", stroke: "var(--wash)", "stroke-width": 12 }),
+      s("circle", { cx: 60, cy: 60, r: 48, fill: "none", stroke: f.farbe, "stroke-width": 12, "stroke-linecap": "round", "stroke-dasharray": `${(U * f.wert) / 100} ${U}`, transform: "rotate(-90 60 60)" }),
+      s("text", { x: 60, y: 69, "text-anchor": "middle", "font-size": 28, "font-weight": 700, fill: "var(--tinte)" }, String(f.wert)));
+    knoten.push(h("section", { class: "form-karte" },
+      h("div", { class: "form-kopf" }, h("div", null, h("span", { class: "form-titel" }, "Tagesform"), h("b", { class: "form-wort", style: { color: f.farbe } }, f.wort), h("p", null, f.rat)), ring),
+      h("ul", { class: "form-teile" }, f.teile.map((t) => h("li", null, h("span", null, t.name), h("div", { class: "form-balken" }, h("i", { style: { width: `${Math.round(t.wert)}%`, background: t.wert >= 65 ? "#34c759" : t.wert >= 45 ? "#ff9f0a" : "#ff3b30" } })), h("b", null, t.anzeige)))),
+      h("p", { class: "form-fuss" }, "Gerechnet aus Schlaf, HRV, Ruhepuls und Body Battery im Vergleich zu deinen eigenen Werten der letzten 60 Tage. Kein medizinischer Befund.")));
+  }
+  for (const a of auffaelligkeiten(k)) knoten.push(h("a", { class: "auffaellig", href: a.link }, h("span", null, "Auffällig"), h("b", null, a.titel), h("p", null, a.text)));
+  return knoten;
+}
 async function ansichtHeute() {
   const heute = heuteIso();
   const von = isoMinus(100);
@@ -1745,6 +1813,7 @@ async function ansichtHeute() {
   }
   if (!brief.childNodes.length) brief.append("Für heute sind noch keine neuen Werte da. Sobald deine Uhr, die Waage oder das Blutdruckmessgerät synchronisiert haben, erscheinen sie hier.");
   knoten.push(brief);
+  try { knoten.push(...tagesformKarte(k)); } catch (e) { console.error(e); }
 
   // ---- Kacheln
   const kacheln = [];
