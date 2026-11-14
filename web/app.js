@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.3";
+const APP_VERSION = "1.4.4";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -557,6 +557,19 @@ function bpKlasse(sys, dia) {
   if (sys >= 135 || dia >= 85) return ["erhöht", "warnung"];
   if (sys >= 120 || dia >= 80) return ["normal", "gut"];
   return ["optimal", "gut"];
+}
+// Fünfstufige Skala wie bei der Blutdruck-Einteilung der ESC/ESH-Leitlinie 2018 (Normal bis Grad 3). Die schlechtere der beiden Zahlen zählt.
+const BP_STUFEN = [["Normal", "#2ee59d"], ["Hochnormal", "#f5e61a"], ["Grad 1", "#ff9500"], ["Grad 2", "#ff2d1f"], ["Grad 3", "#b3141c"]];
+function bpStufe(sys, dia) {
+  const a = sys >= 180 || dia >= 110 ? 4 : sys >= 160 || dia >= 100 ? 3 : sys >= 140 || dia >= 90 ? 2 : sys >= 130 || dia >= 85 ? 1 : 0;
+  return a;
+}
+function bpSkala(sys, dia) {
+  const i = bpStufe(sys, dia);
+  return h("div", { class: "bp-skala", role: "img", "aria-label": `Blutdruck-Einstufung: ${BP_STUFEN[i][0]}${i > 1 ? " Bluthochdruck" : ""}` },
+    h("div", { class: "bp-leiste" }, BP_STUFEN.map(([, f], k) => h("i", { style: { background: f, opacity: k === i ? 1 : 0.35 } })),
+      h("b", { class: "bp-zeiger", style: { left: `${i * 20 + 10}%` } })),
+    h("span", { class: "bp-wort" }, i > 1 ? `${BP_STUFEN[i][0]} Bluthochdruck` : BP_STUFEN[i][0]));
 }
 function chip(text, art = "neutral") { return h("span", { class: `chip ${art}` }, text); }
 const AFIB = { 0: ["Kein Vorhofflimmern", "gut"], 1: ["Vorhofflimmern erkannt", "kritisch"], 2: ["Nicht eindeutig", "warnung"] };
@@ -1726,7 +1739,7 @@ async function ansichtHeute() {
     const alle7 = woche.length ? [mittel(woche.map((m) => m.sys)), mittel(woche.map((m) => m.dia))] : null;
     kacheln.push(kachel({
       titel: "Blutdruck, Mittel 7 Tage", link: "#herz", befund: bf.blutdruck_einzel || bf.blutdruck,
-      extra: h("div", { class: "paar" }, h("div", null, h("span", null, "Morgens"), h("b", null, fmt(mo))), h("div", null, h("span", null, "Abends"), h("b", null, fmt(ab)))),
+      extra: h("div", null, h("div", { class: "paar" }, h("div", null, h("span", null, "Morgens"), h("b", null, fmt(mo))), h("div", null, h("span", null, "Abends"), h("b", null, fmt(ab)))), alle7 ? bpSkala(alle7[0], alle7[1]) : null),
       unter: !alle7 ? "keine Messung in 7 Tagen" : bf.blutdruck_einzel || bf.blutdruck ? "" : chip(alle7[0] >= 135 || alle7[1] >= 85 ? "über 135/85" : "unter 135/85", alle7[0] >= 135 || alle7[1] >= 85 ? "ernst" : "gut"),
     }));
   }

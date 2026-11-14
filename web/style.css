@@ -903,3 +903,8 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .e-link { background: none; border: 0; padding: 0; color: var(--akzent, #0a84ff); font: inherit; text-decoration: underline; cursor: pointer; }
 .e-dialog .kamera { margin-top: 8px; aspect-ratio: 4 / 3; max-height: 55vh; }
 .e-dialog .kamera::after { inset: 25% 8%; border-radius: 12px; }
+.bp-skala { margin-top: 12px; }
+.bp-leiste { position: relative; display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding-top: 9px; }
+.bp-leiste i { display: block; height: 7px; border-radius: 4px; }
+.bp-zeiger { position: absolute; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--tinte); transform: translateX(-50%); transition: left 0.3s; }
+.bp-wort { display: block; margin-top: 4px; font-size: 12px; font-weight: 650; color: var(--tinte-2); }
