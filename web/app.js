@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.6.2";
+const APP_VERSION = "1.6.3";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1971,6 +1971,7 @@ function aktivitaetenUeberlappung(liste) {
   for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length && l[j].von < l[i].von + l[i].d; j++) {
     const ueber = Math.min(l[i].von + l[i].d, l[j].von + l[j].d) - l[j].von;
     if (ueber < 0.5 * Math.min(l[i].d, l[j].d)) continue;
+    if (String(l[i].a.start).slice(0, 10) !== String(l[j].a.start).slice(0, 10)) continue; // nur am selben Tag
     const schluessel = [l[i].a.id, l[j].a.id].sort().join("|");
     if (!erledigt[schluessel]) paare.push({ schluessel, a: l[i].a, b: l[j].a });
   }
