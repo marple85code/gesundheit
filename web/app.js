@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.5";
+const APP_VERSION = "1.7.6";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4879,7 +4879,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.5): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.6): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -4910,6 +4910,18 @@ function formular(titel, felder, ok) {
     ...felderEl, h("div", { class: "knopf-zeile" }, h("button", { type: "button", class: "knopf", onclick: () => { ok(lesen()); dlg.close(); } }, "Speichern"), h("button", { type: "button", class: "knopf zweit", onclick: () => dlg.close() }, "Abbrechen"))));
   dlg.addEventListener("close", () => dlg.remove()); dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
   document.body.append(dlg); dlg.showModal();
+}
+const ZR_AUSW = [[1, "1 Monat", 30, "letzten 30 Tagen"], [3, "3 Monate", 91, "letzten 3 Monaten"], [6, "6 Monate", 182, "letzten 6 Monaten"], [12, "12 Monate", 365, "letzten 12 Monaten"]];
+function zeitKarte(id, fn) {
+  const key = `gesundheit.auswertung.zr.${id}`;
+  let m = Number(speicher.get(key)); if (!ZR_AUSW.some((z) => z[0] === m)) m = 3;
+  const box = h("div"), seg = h("div", { class: "segmente zr", role: "group", "aria-label": "Zeitraum", style: { marginBottom: "8px" } }), inhalt = h("div");
+  const zeigen = () => {
+    seg.replaceChildren(...ZR_AUSW.map(([z, kurz]) => h("button", { type: "button", "aria-pressed": String(z === m), onclick: () => { m = z; speicher.set(key, String(z)); zeigen(); } }, kurz)));
+    const z = ZR_AUSW.find((x) => x[0] === m);
+    inhalt.replaceChildren(fn(z[2], z[3]));
+  };
+  zeigen(); box.append(seg, inhalt); return box;
 }
 function kart(titel, ...inhalt) { return h("section", { class: "form-karte" }, h("div", { class: "form-kopf" }, h("div", null, h("span", { class: "form-titel" }, titel))), ...inhalt); }
 function zeile(a, b, farbe) { return h("div", { style: { display: "flex", justifyContent: "space-between", padding: "5px 0", gap: "12px" } }, h("span", null, a), h("b", { style: farbe ? { color: farbe } : {} }, b)); }
@@ -4945,49 +4957,54 @@ async function ansichtAuswertung() {
     ...(dieW.schlaf != null ? [{ l: "Schlaf im Schnitt", v: zahl(dieW.schlaf, 1), e: "Std." }] : [])]));
 
   // ---- Gewichtsprognose
-  const g = wTaeglich(wReihe(w, 1)).filter((p) => p[0] >= isoMinus(42)).map(([d, v]) => [tagMs(d) / 86400000, v]);
+  const gewichtKarte = (tage, lbl) => {
+  const g = wTaeglich(wReihe(w, 1)).filter((p) => p[0] >= isoMinus(tage)).map(([d, v]) => [tagMs(d) / 86400000, v]);
   const reg = regression(g);
-  if (reg) {
+  if (!reg) return kart("Gewichtsprognose", h("p", null, `In den ${lbl} gibt es zu wenige Wägungen für eine Prognose.`));
+  {
     const jetzt = heuteIso(), t0 = tagMs(jetzt) / 86400000;
     const proWoche = reg.m * 7, in4 = reg.m * (t0 + 28) + reg.c;
-    knoten.push(mitTeilen(kart("Gewichtsprognose",
+    return (mitTeilen(kart("Gewichtsprognose",
       h("b", { style: { fontSize: "28px" } }, `${zahl(in4, 1)} kg`),
-      h("p", null, `In 4 Wochen, wenn es so weitergeht wie in den letzten 6 Wochen (${proWoche >= 0 ? "+" : "−"}${zahl(Math.abs(proWoche), 2)} kg pro Woche).`),
+      h("p", null, `In 4 Wochen, wenn es so weitergeht wie in den ${lbl} (${proWoche >= 0 ? "+" : "−"}${zahl(Math.abs(proWoche), 2)} kg pro Woche).`),
       funke([...g.map((p) => [p[0] * 86400000, p[1]]), [(t0 + 28) * 86400000, in4]], 300, 60)), "Gewichtsprognose",
       [{ l: "Prognose in 4 Wochen", v: zahl(in4, 1), e: "kg" }, { l: "Veränderung pro Woche", v: `${proWoche >= 0 ? "+" : "−"}${zahl(Math.abs(proWoche), 2)}`, e: "kg" }]));
   }
+  };
+  knoten.push(zeitKarte("gewicht", gewichtKarte));
 
 
   // ---- Sportprognose (alle Aktivitäten)
-  {
-    const wochen = [];
-    for (let i = 12; i >= 1; i--) { const v = isoDatum(new Date(tagMs(ws) - i * 7 * 86400000)), b = isoDatum(new Date(tagMs(ws) - (i - 1) * 7 * 86400000)); const l = akt.filter((a_) => inWoche(a_, v, b));
+  const sportKarte = (tage, lbl) => {
+    const N = Math.max(4, Math.round(tage / 7)), wochen = [];
+    for (let i = N; i >= 1; i--) { const v = isoDatum(new Date(tagMs(ws) - i * 7 * 86400000)), b = isoDatum(new Date(tagMs(ws) - (i - 1) * 7 * 86400000)); const l = akt.filter((a_) => inWoche(a_, v, b));
       wochen.push({ v, min: l.reduce((x, a_) => x + (a_.dauer || 0) / 60, 0), km: l.reduce((x, a_) => x + (a_.distanz || 0) / 1000, 0), kcal: l.reduce((x, a_) => x + (a_.kcal || 0), 0), n: l.length }); }
     const aktiv = wochen.filter((x) => x.n > 0);
-    if (aktiv.length < 2) knoten.push(kart("Sportprognose", h("p", null, "Noch zu wenig Aktivitäten in den letzten 12 Wochen für eine Prognose. Sobald in mindestens 2 Wochen Training vorliegt, erscheint sie hier.")));
-    else {
+    if (aktiv.length < 2) return kart("Sportprognose", h("p", null, `Noch zu wenig Aktivitäten in den ${lbl} für eine Prognose. Sobald in mindestens 2 Wochen Training vorliegt, erscheint sie hier.`));
+    {
       const rg = regression(wochen.map((x, i) => [i, x.min])), basis = mittel(wochen.slice(-4).map((x) => x.min));
-      const proj = (j) => Math.max(0, Math.min(basis * 1.6, rg ? rg.m * (12 + j) + rg.c : basis));
+      const proj = (j) => Math.max(0, Math.min(basis * 1.6, rg ? rg.m * (N + j) + rg.c : basis));
       const naech = [0, 1, 2, 3].map(proj), summe = naech.reduce((x, y) => x + y, 0);
       const schnitt = (f) => mittel(wochen.slice(-4).map(f)), nSchnitt = schnitt((x) => x.n);
       const kmS = schnitt((x) => x.km), kcalS = schnitt((x) => x.kcal);
       const trend = rg ? rg.m : 0, trendText = Math.abs(trend) < 3 ? "gleichbleibend" : trend > 0 ? `steigend (+${zahl(Math.round(trend))} Min. pro Woche)` : `fallend (−${zahl(Math.round(-trend))} Min. pro Woche)`;
       const alle = [...wochen.map((x) => x.min), ...naech], max = Math.max(...alle, 1);
       const bw = 300 / alle.length, svg = s("svg", { viewBox: "0 0 300 70", width: "100%", height: 70, role: "img", "aria-label": "Trainingsminuten pro Woche mit Prognose" },
-        ...alle.map((v, i) => s("rect", { x: i * bw + 2, y: 66 - (v / max) * 62, width: bw - 4, height: Math.max(1, (v / max) * 62), rx: 3, fill: "#0a84ff", opacity: i < 12 ? 1 : 0.38 })));
-      const proTyp = new Map(); for (const a_ of akt.filter((x) => String(x.start).slice(0, 10) >= isoMinus(56))) { const n = sportName(a_.typ); proTyp.set(n, (proTyp.get(n) || 0) + (a_.dauer || 0) / 60); }
+        ...alle.map((v, i) => s("rect", { x: i * bw + 2, y: 66 - (v / max) * 62, width: bw - 4, height: Math.max(1, (v / max) * 62), rx: 3, fill: "#0a84ff", opacity: i < N ? 1 : 0.38 })));
+      const proTyp = new Map(); for (const a_ of akt.filter((x) => String(x.start).slice(0, 10) >= isoMinus(tage))) { const n = sportName(a_.typ); proTyp.set(n, (proTyp.get(n) || 0) + (a_.dauer || 0) / 60); }
       const typen = [...proTyp.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4), gesamt = [...proTyp.values()].reduce((x, y) => x + y, 0) || 1;
-      knoten.push(mitTeilen(kart("Sportprognose",
+      return (mitTeilen(kart("Sportprognose",
         h("b", { style: { fontSize: "28px" } }, `${zahl(Math.round(summe))} Min.`),
-        h("p", null, `Voraussichtlich in den nächsten 4 Wochen, Trend ${trendText}. Gerechnet aus allen Aktivitäten der letzten 12 Wochen, helle Balken sind die Prognose.`),
+        h("p", null, `Voraussichtlich in den nächsten 4 Wochen, Trend ${trendText}. Gerechnet aus allen Aktivitäten der ${lbl}, helle Balken sind die Prognose.`),
         svg,
         zeile("Ø Aktivitäten pro Woche", zahl(nSchnitt, 1)), zeile("Ø Trainingszeit pro Woche", `${zahl(Math.round(basis))} Min.`),
         kmS ? zeile("Ø Distanz pro Woche", `${zahl(kmS, 1)} km`) : null, kcalS ? zeile("Ø Kalorien pro Woche", `${zahl(Math.round(kcalS))} kcal`) : null,
-        typen.length ? h("div", null, h("b", null, "Anteile der Trainingszeit (8 Wochen)"), ...typen.map(([n, m]) => zeile(n, `${Math.round((m / gesamt) * 100)} %`))) : null,
+        typen.length ? h("div", null, h("b", null, `Anteile der Trainingszeit (${lbl})`), ...typen.map(([n, m]) => zeile(n, `${Math.round((m / gesamt) * 100)} %`))) : null,
         h("p", null, "Hochrechnung aus deinen bisherigen Gewohnheiten, keine Vorhersage von Leistung.")),
         "Sportprognose", [{ l: "Prognose 4 Wochen", v: zahl(Math.round(summe)), e: "Min." }, { l: "Ø pro Woche", v: zahl(Math.round(basis)), e: "Min." }, { l: "Aktivitäten pro Woche", v: zahl(nSchnitt, 1), e: "" }, ...(kmS ? [{ l: "Distanz pro Woche", v: zahl(kmS, 1), e: "km" }] : [])]));
     }
-  }
+  };
+  knoten.push(zeitKarte("sport", sportKarte));
 
   // ---- Zusammenhang Training und HRV
   const hrv = new Map(k.hrv || []), ruhe = new Map(k.ruhepuls || []);
@@ -5048,14 +5065,18 @@ async function ansichtAuswertung() {
       (v) => { if (!v.name.trim()) return; ausr.push({ name: v.name.trim(), art: v.art, ab: v.ab || heute, limit: Number(v.limit) || 0 }); speicher.set(A_AUSR, JSON.stringify(ausr)); ausrZeigen(); }) }, "Ausrüstung hinzufügen")));
 
   // ---- Blutdruck nach Tageszeit
-  const bp = blutdruckMessungen(w).filter((m) => m.ts >= tagMs(isoMinus(90)));
-  if (bp.length >= 4) {
+  const bpKarte = (tage, lbl) => {
+  const bp = blutdruckMessungen(w).filter((m) => m.ts >= tagMs(isoMinus(tage)));
+  if (bp.length < 4) return kart("Blutdruck nach Tageszeit", h("p", null, `In den ${lbl} gibt es zu wenige Messungen für einen Vergleich.`));
+  {
     const mo = bp.filter((m) => istMorgens(m.ts)), ab = bp.filter((m) => !istMorgens(m.ts));
-    knoten.push(kart("Blutdruck nach Tageszeit (90 Tage)",
+    return (kart(`Blutdruck nach Tageszeit (${lbl})`,
       mo.length ? zeile("Morgens", `${zahl(mittel(mo.map((m) => m.sys)))}/${zahl(mittel(mo.map((m) => m.dia)))} (${mo.length} Messungen)`) : null,
       ab.length ? zeile("Abends", `${zahl(mittel(ab.map((m) => m.sys)))}/${zahl(mittel(ab.map((m) => m.dia)))} (${ab.length} Messungen)`) : null,
       h("p", null, "Hilfreich für das Gespräch mit der Ärztin oder dem Arzt. Kein medizinischer Befund.")));
   }
+  };
+  knoten.push(zeitKarte("blutdruck", bpKarte));
 
   // ---- Körperzusammensetzung und Fitnessalter
   const fett = wTaeglich(wReihe(w, 6)), musk = wTaeglich(wReihe(w, 76));
