@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.3";
+const APP_VERSION = "1.7.4";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4866,7 +4866,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.3): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.4): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5118,7 +5118,7 @@ function geruestBauen() {
     id === "hinweise" ? h("span", { class: "nav-marke", hidden: true, "aria-hidden": "true" }) : null);
   const leiste = h("nav", { class: "leiste", "aria-label": "Bereiche" }, NAV.map(navLink));
   const seite = h("nav", { class: "seitenleiste", "aria-label": "Bereiche" },
-    h("div", { class: "marke" }, icon("marke", 30), "Gesundheit"),
+    h("div", { class: "marke" }, h("img", { src: "icons/icon-192.png", alt: "", width: 30, height: 30, style: { borderRadius: "7px" } }), "Gesundheit"),
     NAV.map(navLink),
     h("div", { class: "trenner" }),
     MEHR.map(([id, name]) => h("a", { href: `#${id}`, "data-ziel": id }, icon(id), name)));
@@ -5236,7 +5236,7 @@ function tor(fehlertext) {
     schritt();
   };
   wurzel.replaceChildren(h("div", { class: "tor" }, h("div", { class: "tor-inhalt" },
-    (() => { const m = icon("marke", 64); m.classList.add("tor-marke"); return m; })(),
+    h("img", { src: "icons/icon-192.png", alt: "", class: "tor-marke", style: { borderRadius: "14px" } }),
     h("h1", null, "Gesundheit"),
     h("p", null, "Deine Withings- und Garmin-Daten sind verschlüsselt. Damit dieses Gerät sie lesen kann, braucht es einmal deinen Schlüssel."),
     h("p", null, "Den QR-Code zeigt dir das Einrichtungsfenster auf dem Chromebook im letzten Schritt."),
