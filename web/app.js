@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.7";
+const APP_VERSION = "1.7.8";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4747,15 +4747,25 @@ function eDialog(optionen) {
       })); aktual();
     };
     const mehr = h("button", { class: "knopf zweit", type: "button", onclick: () => { zeilen.push({ an: true, g: 100, name: "", treffer: [], wahl: 0 }); zeichneZeilen(); } }, "Zutat ergänzen");
-    const ok = h("button", { class: "knopf", type: "button", onclick: () => {
+    const gName = h("input", { type: "text", class: "e-suche", placeholder: "Name des Gerichts", "aria-label": "Name des Gerichts", autocomplete: "off" });
+    const gCb = h("input", { type: "checkbox", "aria-label": "Als Gericht speichern" });
+    const gBox = h("label", { class: "e-zeile-oben", style: { alignItems: "center", gap: "8px" } }, gCb, h("span", null, "Auch als eigenes Gericht mit Foto speichern"));
+    const ok = h("button", { class: "knopf", type: "button", onclick: async () => {
       const gewaehlt = zeilen.filter((r) => r.an && r.g > 0 && r.treffer[r.wahl]); if (!gewaehlt.length) return;
+      if (gCb.checked) {
+        if (!gName.value.trim()) { gName.focus(); return; }
+        let foto = null; try { foto = await bildVerkleinern(bild, 192, 0.8); } catch { /* ohne Foto */ }
+        const lg = eLesen(E_GERICHTE, []);
+        lg.push({ id: eNeueId(), name: gName.value.trim(), foto, portionen: 1, zutaten: gewaehlt.map((r) => { const t = r.treffer[r.wahl]; return { name: t.name, marke: t.marke || "", quelle: t.quelle || "", l: t.l.map((v) => eRund(v || 0, 2)), g: eRund(r.g, 1) }; }) });
+        speicher.set(E_GERICHTE, JSON.stringify(lg)); eGerichteGeaendert();
+      }
       const l = eTagEintraege(optionen.tag);
       for (const r of gewaehlt) { const t = r.treffer[r.wahl]; l.push({ id: eNeueId(), mahl, name: t.name, marke: t.marke || "", g: eRund(r.g, 1), l: t.l.map((v) => eRund(v || 0, 2)), quelle: t.quelle || "", portion: null }); }
       eTagSchreiben(optionen.tag, l); dlg.close(); optionen.fertig();
     } }, "Hinzufügen");
     inhalt.replaceChildren(kopf("Erkannte Zutaten", () => fotoAnsicht()), h("img", { class: "e-foto gross", src: bild, alt: "", style: { width: "100%", maxHeight: "200px", objectFit: "cover", borderRadius: "12px" } }),
       h("p", { class: "e-klein" }, "Prüfe Mengen und Lebensmittel. Schätzungen aus Fotos sind oft zu niedrig, besonders bei Soßen und Öl."),
-      h("div", { class: "e-zeile-oben" }, mahlAuswahl()), liste, mehr, summe, h("div", { class: "knopf-zeile" }, ok));
+      h("div", { class: "e-zeile-oben" }, mahlAuswahl()), liste, mehr, summe, gBox, gName, h("div", { class: "knopf-zeile" }, ok));
     zeichneZeilen();
   }
 
@@ -4966,7 +4976,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.7): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.8): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
