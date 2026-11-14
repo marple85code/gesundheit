@@ -948,3 +948,4 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .chip-haken { display: inline-flex; align-items: center; gap: 4px; color: #34c759; }
 .chip-haken svg, .haken-gruen svg { color: #34c759; stroke: #34c759; }
 .haken-gruen { display: inline-flex; margin-left: 6px; vertical-align: middle; }
+.akt-zeile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.5.3";
+const APP_VERSION = "1.5.4";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -322,7 +322,7 @@ const Daten = {
     }
     return w;
   },
-  async aktivitaeten() { return ((await this.datei("d/aktivitaeten.enc")) || {}).liste || []; },
+  async aktivitaeten() { return sportAenderungen(((await this.datei("d/aktivitaeten.enc")) || {}).liste || []); },
   async ekg() { return ((await this.datei("d/ekg.enc")) || {}).liste || []; },
   async info(quelle) { return (await this.datei(`d/${quelle}_info.enc`)) || {}; },
   async tag(iso) { return this.datei(`d/tag/${iso}.enc`); },
@@ -1817,6 +1817,69 @@ async function ansichtHeute() {
   return { titel: "Heute", knoten };
 }
 
+// ---- Aktivitäten umbenennen oder löschen (langer Druck); gilt nur in der App, bei Garmin bleibt alles unverändert
+const S_AEND = "gesundheit.sport.aend", S_AENDZ = "gesundheit.sport.aendzeit";
+function sportAendLesen() { try { return JSON.parse(speicher.get(S_AEND) || "{}") || {}; } catch { return {}; } }
+function sportAenderungen(liste) {
+  const m = sportAendLesen();
+  if (!Object.keys(m).length) return liste;
+  return liste.filter((a) => !(m[a.id] && m[a.id].x)).map((a) => (m[a.id] && m[a.id].n ? { ...a, name: m[a.id].n } : a));
+}
+function sportAendern(id, aenderung) {
+  const m = sportAendLesen();
+  m[id] = { ...(m[id] || {}), ...aenderung };
+  if (!m[id].x && !m[id].n) delete m[id];
+  speicher.set(S_AEND, JSON.stringify(m));
+  speicher.set(S_AENDZ, String(Date.now()));
+  E_ABG.runden = 0; eAbgleichPlanen(3000);
+  neuZeichnen();
+}
+function sportMenue(a) {
+  const dlg = h("dialog", { class: "blatt-dialog e-dialog", "aria-label": "Aktivität bearbeiten" });
+  const zu = () => dlg.close();
+  const name = h("input", { type: "text", class: "e-suche", value: a.name || sportName(a.typ), "aria-label": "Name der Aktivität", autocomplete: "off" });
+  const inhalt = h("div", { class: "dialog-inhalt" });
+  const start = () => inhalt.replaceChildren(
+    h("div", { class: "dialog-kopf" }, h("h2", null, a.name || sportName(a.typ)), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: zu }, icon("zu", 20))),
+    h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: umbenennen }, "Umbenennen"),
+      h("button", { class: "knopf zweit", type: "button", style: { color: "#ff3b30" }, onclick: loeschen }, "Löschen")));
+  const umbenennen = () => inhalt.replaceChildren(
+    h("div", { class: "dialog-kopf" }, h("h2", null, "Umbenennen"), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: zu }, icon("zu", 20))),
+    name, h("div", { class: "knopf-zeile" },
+      h("button", { class: "knopf", type: "button", onclick: () => { const n = name.value.trim(); zu(); sportAendern(a.id, { n: n || undefined }); } }, "Speichern"),
+      h("button", { class: "knopf zweit", type: "button", onclick: start }, "Abbrechen")));
+  const loeschen = () => inhalt.replaceChildren(
+    h("div", { class: "dialog-kopf" }, h("h2", null, "Aktivität löschen?"), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: zu }, icon("zu", 20))),
+    h("p", { class: "e-klein" }, "Sie verschwindet aus der App auf allen deinen Geräten. Bei Garmin bleibt sie erhalten."),
+    h("div", { class: "knopf-zeile" },
+      h("button", { class: "knopf", type: "button", style: { background: "#ff3b30" }, onclick: () => { zu(); sportAendern(a.id, { x: 1 }); } }, "Endgültig löschen"),
+      h("button", { class: "knopf zweit", type: "button", onclick: start }, "Abbrechen")));
+  dlg.append(inhalt);
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) zu(); });
+  dlg.addEventListener("close", () => dlg.remove());
+  start();
+  document.body.append(dlg); dlg.showModal();
+}
+function langerDruck(el, fn) {
+  let t = null, x0 = 0, y0 = 0, ausgeloest = false;
+  const ab = () => { clearTimeout(t); t = null; };
+  el.addEventListener("pointerdown", (e) => { if (e.button) return; ausgeloest = false; x0 = e.clientX; y0 = e.clientY; ab(); t = setTimeout(() => { ausgeloest = true; if (navigator.vibrate) navigator.vibrate(15); fn(); }, 550); });
+  el.addEventListener("pointermove", (e) => { if (t && Math.hypot(e.clientX - x0, e.clientY - y0) > 10) ab(); });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((n) => el.addEventListener(n, ab));
+  el.addEventListener("click", (e) => { if (ausgeloest) { e.preventDefault(); e.stopPropagation(); ausgeloest = false; } }, true);
+  el.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!ausgeloest) { ausgeloest = true; fn(); } });
+  el.addEventListener("dragstart", (e) => e.preventDefault());
+}
+async function sportAbgleichen(z) {
+  const pfad = "d/ernaehrung/sport.enc";
+  const c = await eCloudLesen(pfad);
+  if (c.fehler) return { fehler: true };
+  const lz = Number(speicher.get(S_AENDZ)) || 0, cz = (c.daten && c.daten.z) || 0;
+  if (cz > lz) { speicher.set(S_AEND, JSON.stringify(c.daten.aend || {})); speicher.set(S_AENDZ, String(cz)); return { neu: true }; }
+  if (lz > cz) { await ePush(z, pfad, { z: lz, aend: sportAendLesen() }); return { hoch: true }; }
+  return {};
+}
+
 function aktivitaetZeile(a) {
   const laufen = istLauf(a.typ);
   const zahlen = [];
@@ -1824,10 +1887,12 @@ function aktivitaetZeile(a) {
   zahlen.push(["Dauer", dauer(a.dauer, false)]);
   if (a.distanz && a.tempo) zahlen.push([laufen ? "min/km" : "km/h", tempoText(a.tempo, laufen)]);
   else if (a.hf) zahlen.push(["Puls", zahl(a.hf)]);
-  return h("a", { class: "zeile", href: `#aktivitaet/${a.id}` },
+  const zeile = h("a", { class: "zeile akt-zeile", href: `#aktivitaet/${a.id}` },
     h("span", { class: "symbol" }, icon(sportIcon(a.typ))),
     h("span", { class: "haupt" }, h("b", null, a.name || sportName(a.typ)), h("span", null, `${datum(a.start.slice(0, 10), "wochentag")}, ${a.start.slice(11, 16)} Uhr`)),
     h("span", { class: "kennzahlen" }, zahlen.map(([n, v]) => h("div", null, h("b", null, v), h("span", null, n)))));
+  langerDruck(zeile, () => sportMenue(a));
+  return zeile;
 }
 function ekgZeile(e) {
   const [text, art] = AFIB[e.afib] || [e.afib != null ? String(e.afib) : "ohne Auswertung", "neutral"];
@@ -2597,6 +2662,7 @@ async function ansichtSchlaf() {
 // ======================================================================
 let sportFilter = "alle";
 async function ansichtSport() {
+  eAbgleichPlanen(1500);
   const [akt, info] = await Promise.all([Daten.aktivitaeten(), Daten.info("garmin")]);
   const k = await kennzahlen(["schritte", "im_mod", "etagen", "aktivkcal", "vo2lauf", "vo2rad", "bereitschaft",
     "fitnessalter", "last_akut", "wochenlast", "p5k", "ausdauer", "huegel"], isoMinus(364));
@@ -4105,7 +4171,7 @@ async function eGerichteAbgleichen(z) {
 async function eAbgleichen() {
   if (E_ABG.laeuft) { E_ABG.nochmal = true; return; }
   E_ABG.laeuft = true;
-  let neu = false, stammNeu = false;
+  let neu = false, stammNeu = false, sportNeu = false;
   try {
     const z = await Sync.zugang();
     if (!z) { eStatus("Nur auf diesem Gerät gespeichert (kein Sync-Token eingerichtet)."); return; }
@@ -4124,6 +4190,8 @@ async function eAbgleichen() {
     if (st.fehler) fehler = true; else { if (st.neu) stammNeu = true; if (st.hoch) hoch = true; }
     const ge = await eGerichteAbgleichen(z);
     if (ge.fehler) fehler = true; else { if (ge.neu) neu = true; if (ge.hoch) hoch = true; }
+    const sp = await sportAbgleichen(z);
+    if (sp.fehler) fehler = true; else { if (sp.neu) { neu = true; sportNeu = true; } if (sp.hoch) hoch = true; }
     speicher.set(E_OFFEN, JSON.stringify([...offen]));
     if (fehler) eStatus("Abgleich nicht möglich. Bist du online? Die Daten bleiben auf diesem Gerät.");
     else if (hoch || offen.size) {
@@ -4136,6 +4204,7 @@ async function eAbgleichen() {
     E_ABG.laeuft = false;
     if (E_ABG.nochmal) { E_ABG.nochmal = false; eAbgleichPlanen(2000); }
   }
+  if (sportNeu && /^#(sport|heute)?$/.test(location.hash)) neuZeichnen();
   if (neu || stammNeu) document.dispatchEvent(new CustomEvent("gawi:ernaehrung", { detail: { stamm: stammNeu } }));
 }
 document.addEventListener("gawi:ernaehrung", (ev) => {

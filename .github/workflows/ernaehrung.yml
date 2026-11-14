@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       datei:
-        description: "Name der Datei: JJJJ-MM, stamm oder gerichte"
+        description: "Name der Datei: JJJJ-MM, stamm, gerichte oder sport"
         required: true
       inhalt:
         description: "Verschlüsselter Inhalt (Base64)"
@@ -34,7 +34,7 @@ jobs:
         env:
           DATEI: ${{ inputs.datei }}
         run: |
-          if ! printf '%s' "$DATEI" | grep -Eq '^(stamm|gerichte|[0-9]{4}-(0[1-9]|1[0-2]))$'; then
+          if ! printf '%s' "$DATEI" | grep -Eq '^(stamm|gerichte|sport|[0-9]{4}-(0[1-9]|1[0-2]))$'; then
             echo "Ungueltiger Dateiname"; exit 1
           fi
 
