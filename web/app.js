@@ -4673,16 +4673,16 @@ function eDialog(optionen) {
   }
 
   const GEM_MODELLE = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"];
-  async function geminiFragen(key, bild64) {
+  async function geminiFragen(key, bilder64) {
     const eigen = (speicher.get("gawi.gemini.modell") || "").trim();
     const modelle = eigen ? [eigen, ...GEM_MODELLE] : GEM_MODELLE;
-    const text = "Du siehst ein Foto einer Mahlzeit. Nenne jede erkennbare Zutat oder Komponente mit einer Schätzung der verzehrten Menge in Gramm (Zutat im Zustand wie gegessen, z. B. Nudeln gekocht). Verwende kurze, allgemeine deutsche Lebensmittelnamen ohne Marken. Gib keine Kalorien an. Gib höchstens 12 Positionen aus. Ist kein Essen zu sehen, gib eine leere Liste zurück.";
+    const text = "Du siehst ein bis drei Fotos derselben Mahlzeit (eventuell aus verschiedenen Blickwinkeln, zähle nichts doppelt). Nenne jede erkennbare Zutat oder Komponente mit einer Schätzung der verzehrten Menge in Gramm (Zutat im Zustand wie gegessen, z. B. Nudeln gekocht). Verwende kurze, allgemeine deutsche Lebensmittelnamen ohne Marken. Gib keine Kalorien an. Gib höchstens 12 Positionen aus. Ist kein Essen zu sehen, gib eine leere Liste zurück.";
     let letzter = "";
     for (const m of modelle) {
       let r;
       try {
         r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: "POST", signal: AbortSignal.timeout(40000), headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-          body: JSON.stringify({ contents: [{ parts: [{ text }, { inline_data: { mime_type: "image/jpeg", data: bild64 } }] }],
+          body: JSON.stringify({ contents: [{ parts: [{ text }, ...bilder64.map((b) => ({ inline_data: { mime_type: "image/jpeg", data: b } }))] }],
             generationConfig: { responseMimeType: "application/json", temperature: 0.2, responseSchema: { type: "OBJECT", properties: { zutaten: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, gramm: { type: "NUMBER" } }, required: ["name", "gramm"] } } }, required: ["zutaten"] } } }) });
       } catch { throw new Error("Keine Verbindung zu Google."); }
       if (r.status === 400 || r.status === 401 || r.status === 403) { let t = ""; try { t = (await r.json()).error.message; } catch { /* leer */ } if (/key|API/i.test(t)) throw new Error("Der Google-Schlüssel wurde abgelehnt."); letzter = t; continue; }
@@ -4699,8 +4699,9 @@ function eDialog(optionen) {
     const meld = h("p", { class: "e-klein e-status" });
     const ort = h("div");
     const keyFeld = h("input", { type: "password", class: "e-suche", placeholder: "Google-Schlüssel (AIza… oder AQ.…)", autocomplete: "off", "aria-label": "Google-Schlüssel" });
-    const datei = h("input", { type: "file", accept: "image/*", hidden: true });
-    const hinweis = h("p", { class: "e-klein" }, "Hinweis: Das Foto wird zur Auswertung an Google gesendet. In der kostenlosen Stufe darf Google Eingaben zur Verbesserung seiner Produkte nutzen. Die Mengen sind Schätzungen, bitte prüfe sie. Die Nährwerte kommen aus der Datenbank der App.");
+    const fotos = [];
+    const datei = h("input", { type: "file", accept: "image/*", multiple: true, hidden: true });
+    const hinweis = h("p", { class: "e-klein" }, "Hinweis: Bis zu 3 Fotos pro Mahlzeit. Die Fotos werden zur Auswertung an Google gesendet. In der kostenlosen Stufe darf Google Eingaben zur Verbesserung seiner Produkte nutzen. Die Mengen sind Schätzungen, bitte prüfe sie. Die Nährwerte kommen aus der Datenbank der App.");
     function start() {
       const key = speicher.get("gawi.gemini");
       if (!key) {
@@ -4708,26 +4709,39 @@ function eDialog(optionen) {
           h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => { const v = keyFeld.value.trim(); if (v.length < 20) { meld.textContent = "Bitte den ganzen Schlüssel einfügen."; return; } speicher.set("gawi.gemini", v); meld.textContent = ""; start(); } }, "Schlüssel speichern")));
         return;
       }
-      ort.replaceChildren(h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: kamera }, icon("kamera", 20), "Kamera öffnen"), h("button", { class: "knopf zweit", type: "button", onclick: () => datei.click() }, "Foto auswählen")),
+      const voll = fotos.length >= 3;
+      ort.replaceChildren(
+        fotos.length ? h("div", { style: { display: "flex", gap: "8px", margin: "8px 0" } }, fotos.map((f, i) => h("div", { style: { position: "relative", flex: "1", maxWidth: "33%" } },
+          h("img", { src: f, alt: `Foto ${i + 1}`, style: { width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: "12px", display: "block" } }),
+          h("button", { type: "button", "aria-label": "Foto entfernen", class: "dialog-zu", style: { position: "absolute", top: "4px", right: "4px", width: "28px", height: "28px" }, onclick: () => { fotos.splice(i, 1); start(); } }, icon("zu", 14))))) : null,
+        h("p", { class: "e-klein" }, `${fotos.length} von 3 Fotos`),
+        voll ? null : h("div", { class: "knopf-zeile" }, h("button", { class: fotos.length ? "knopf zweit" : "knopf", type: "button", onclick: kamera }, icon("kamera", 20), "Kamera öffnen"), h("button", { class: "knopf zweit", type: "button", onclick: () => datei.click() }, "Foto auswählen")),
+        fotos.length ? h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: auswerten }, `Auswerten (${fotos.length} ${fotos.length === 1 ? "Foto" : "Fotos"})`)) : null,
         h("div", { class: "knopf-zeile" }, h("button", { class: "e-link", type: "button", onclick: () => { if (window.confirm("Gespeicherten Schlüssel von diesem Gerät entfernen?")) { speicher.set("gawi.gemini", null); start(); } } }, "Schlüssel entfernen")));
     }
-    async function auswerten(url) {
-      ort.replaceChildren(h("img", { src: url, alt: "", style: { width: "100%", maxHeight: "40vh", objectFit: "cover", borderRadius: "12px" } })); meld.textContent = "Foto wird ausgewertet …"; hinweis.hidden = true;
+    async function verkleinern(url) {
+      const img = await new Promise((ok, nein) => { const i = new Image(); i.onload = () => ok(i); i.onerror = nein; i.src = url; });
+      const k = Math.min(1, 1024 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.8);
+    }
+    async function hinzu(url) { try { fotos.push(await verkleinern(url)); meld.textContent = ""; } catch { meld.textContent = "Das Foto konnte nicht gelesen werden."; } start(); }
+    async function auswerten() {
+      if (!fotos.length) return;
+      ort.replaceChildren(h("div", { style: { display: "flex", gap: "8px" } }, fotos.map((f) => h("img", { src: f, alt: "", style: { flex: "1", minWidth: "0", maxWidth: `${100 / fotos.length}%`, maxHeight: "30vh", objectFit: "cover", borderRadius: "12px" } })))); meld.textContent = "Fotos werden ausgewertet …"; hinweis.hidden = true;
       try {
-        const img = await new Promise((ok, nein) => { const i = new Image(); i.onload = () => ok(i); i.onerror = nein; i.src = url; });
-        const k = Math.min(1, 1024 / Math.max(img.width, img.height));
-        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        const klein = c.toDataURL("image/jpeg", 0.8);
-        const z = await geminiFragen(speicher.get("gawi.gemini"), klein.split(",")[1]);
-        if (!z.length) { meld.textContent = "Auf dem Foto wurde nichts Essbares erkannt. Versuche es mit einem anderen Foto oder trage von Hand ein."; hinweis.hidden = false; start(); return; }
-        meld.textContent = ""; hinweis.hidden = false; await pruefen(z, klein);
+        const z = await geminiFragen(speicher.get("gawi.gemini"), fotos.map((f) => f.split(",")[1]));
+        if (!z.length) { meld.textContent = "Auf den Fotos wurde nichts Essbares erkannt. Versuche es mit anderen Fotos oder trage von Hand ein."; hinweis.hidden = false; start(); return; }
+        meld.textContent = ""; hinweis.hidden = false; await pruefen(z, fotos[0]);
       } catch (e) { fehlerMerken(e); hinweis.hidden = false; inhalt.replaceChildren(kopf("Foto erkennen", zurueck), ort, meld, hinweis, datei); meld.textContent = `${e && e.message ? e.message : "Das hat nicht geklappt."} (${fehlerText(e).slice(0, 160)}) Du kannst weiterhin von Hand eintragen.`; start(); }
     }
     datei.addEventListener("change", async () => {
-      const f = datei.files && datei.files[0]; datei.value = ""; if (!f) return;
-      const url = await new Promise((ok, nein) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = nein; fr.readAsDataURL(f); });
-      auswerten(url);
+      const dateien = [...(datei.files || [])].slice(0, 3 - fotos.length); datei.value = "";
+      for (const f of dateien) {
+        const url = await new Promise((ok, nein) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = nein; fr.readAsDataURL(f); });
+        await hinzu(url);
+      }
     });
     async function kamera() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { meld.textContent = "Die Kamera ist hier nicht verfügbar. Wähle stattdessen ein Foto aus."; return; }
@@ -4737,12 +4751,12 @@ function eDialog(optionen) {
       const video = h("video", { playsinline: true, muted: true, autoplay: true }); video.srcObject = strom;
       const aus = () => { strom.getTracks().forEach((t) => t.stop()); if (scanStopp === aus) scanStopp = null; };
       if (scanStopp) scanStopp(); scanStopp = aus;
-      meld.textContent = "Halte das Essen ins Bild und tippe auf Aufnehmen.";
+      meld.textContent = `Foto ${fotos.length + 1} von 3: Halte das Essen ins Bild und tippe auf Aufnehmen.`;
       ort.replaceChildren(h("div", { class: "kamera foto" }, video), h("div", { class: "knopf-zeile" },
         h("button", { class: "knopf", type: "button", onclick: () => {
           if (!video.videoWidth) return;
           const c = document.createElement("canvas"); c.width = video.videoWidth; c.height = video.videoHeight; c.getContext("2d").drawImage(video, 0, 0);
-          const url = c.toDataURL("image/jpeg", 0.9); aus(); auswerten(url);
+          const url = c.toDataURL("image/jpeg", 0.9); aus(); hinzu(url);
         } }, "Aufnehmen"),
         h("button", { class: "knopf zweit", type: "button", onclick: () => { aus(); meld.textContent = ""; start(); } }, "Abbrechen")));
     }
