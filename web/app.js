@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.7.6";
+const APP_VERSION = "1.7.7";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4672,6 +4672,93 @@ function eDialog(optionen) {
     if (vorgabe) suchen(vorgabe); else starten();
   }
 
+  const GEM_MODELLE = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-flash"];
+  async function geminiFragen(key, bild64) {
+    const eigen = (speicher.get("gawi.gemini.modell") || "").trim();
+    const modelle = eigen ? [eigen, ...GEM_MODELLE] : GEM_MODELLE;
+    const text = "Du siehst ein Foto einer Mahlzeit. Nenne jede erkennbare Zutat oder Komponente mit einer Schätzung der verzehrten Menge in Gramm (Zutat im Zustand wie gegessen, z. B. Nudeln gekocht). Verwende kurze, allgemeine deutsche Lebensmittelnamen ohne Marken. Gib keine Kalorien an. Gib höchstens 12 Positionen aus. Ist kein Essen zu sehen, gib eine leere Liste zurück.";
+    let letzter = "";
+    for (const m of modelle) {
+      let r;
+      try {
+        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify({ contents: [{ parts: [{ text }, { inline_data: { mime_type: "image/jpeg", data: bild64 } }] }],
+            generationConfig: { responseMimeType: "application/json", temperature: 0.2, responseSchema: { type: "OBJECT", properties: { zutaten: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, gramm: { type: "NUMBER" } }, required: ["name", "gramm"] } } }, required: ["zutaten"] } } }) });
+      } catch { throw new Error("Keine Verbindung zu Google."); }
+      if (r.status === 400 || r.status === 401 || r.status === 403) { let t = ""; try { t = (await r.json()).error.message; } catch { /* leer */ } if (/key|API/i.test(t)) throw new Error("Der Google-Schlüssel wurde abgelehnt."); letzter = t; continue; }
+      if (r.status === 429 || r.status === 404 || r.status >= 500) { letzter = r.status === 429 ? "Das Tageslimit von Google ist erreicht." : "Das Modell ist gerade nicht verfügbar."; continue; }
+      if (!r.ok) { letzter = `Fehler ${r.status}`; continue; }
+      const j = await r.json();
+      const t = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts.map((p) => p.text || "").join("");
+      try { const o = JSON.parse(t); return (o.zutaten || []).filter((z) => z && z.name && Number(z.gramm) > 0); } catch { letzter = "Die Antwort war nicht lesbar."; }
+    }
+    throw new Error(letzter || "Die Erkennung hat nicht geklappt.");
+  }
+  async function fotoAnsicht() {
+    const zurueck = () => sucheAnsicht();
+    const meld = h("p", { class: "e-klein e-status" });
+    const ort = h("div");
+    const keyFeld = h("input", { type: "password", class: "e-suche", placeholder: "Google-Schlüssel (AIza… oder AQ.…)", autocomplete: "off", "aria-label": "Google-Schlüssel" });
+    const datei = h("input", { type: "file", accept: "image/*", hidden: true });
+    const hinweis = h("p", { class: "e-klein" }, "Hinweis: Das Foto wird zur Auswertung an Google gesendet. In der kostenlosen Stufe darf Google Eingaben zur Verbesserung seiner Produkte nutzen. Die Mengen sind Schätzungen, bitte prüfe sie. Die Nährwerte kommen aus der Datenbank der App.");
+    function start() {
+      const key = speicher.get("gawi.gemini");
+      if (!key) {
+        ort.replaceChildren(h("p", { class: "e-klein" }, "Für die Foto-Erkennung brauchst du einmalig einen kostenlosen Schlüssel von Google (aistudio.google.com, Knopf Get API key). Er wird nur auf diesem Gerät gespeichert."), keyFeld,
+          h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => { const v = keyFeld.value.trim(); if (v.length < 20) { meld.textContent = "Bitte den ganzen Schlüssel einfügen."; return; } speicher.set("gawi.gemini", v); meld.textContent = ""; start(); } }, "Schlüssel speichern")));
+        return;
+      }
+      ort.replaceChildren(h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => datei.click() }, icon("kamera", 20), "Foto aufnehmen oder wählen")),
+        h("div", { class: "knopf-zeile" }, h("button", { class: "e-link", type: "button", onclick: () => { if (window.confirm("Gespeicherten Schlüssel von diesem Gerät entfernen?")) { speicher.set("gawi.gemini", null); start(); } } }, "Schlüssel entfernen")));
+    }
+    datei.addEventListener("change", async () => {
+      const f = datei.files && datei.files[0]; datei.value = ""; if (!f) return;
+      ort.replaceChildren(); meld.textContent = "Foto wird ausgewertet …";
+      try {
+        const url = await new Promise((ok, nein) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = nein; fr.readAsDataURL(f); });
+        const img = await new Promise((ok, nein) => { const i = new Image(); i.onload = () => ok(i); i.onerror = nein; i.src = url; });
+        const k = Math.min(1, 1024 / Math.max(img.width, img.height));
+        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        const klein = c.toDataURL("image/jpeg", 0.8);
+        const z = await geminiFragen(speicher.get("gawi.gemini"), klein.split(",")[1]);
+        if (!z.length) { meld.textContent = "Auf dem Foto wurde nichts Essbares erkannt. Versuche es mit einem anderen Foto oder trage von Hand ein."; start(); return; }
+        meld.textContent = ""; pruefen(z, klein);
+      } catch (e) { meld.textContent = `${e && e.message ? e.message : "Das hat nicht geklappt."} Du kannst weiterhin von Hand eintragen.`; start(); }
+    });
+    inhalt.replaceChildren(kopf("Foto erkennen", zurueck), ort, meld, hinweis, datei);
+    start();
+  }
+  async function pruefen(zutaten, bild) {
+    let bls = []; try { bls = await eBlsLaden(); } catch { /* ohne Datenbank */ }
+    const finde = (n) => { let t = eSuchen(bls, n, 8); if (!t.length) { const w = n.split(/[\\s,]+/)[0]; if (w) t = eSuchen(bls, w, 8); } return t; };
+    const zeilen = zutaten.map((z) => ({ an: true, g: Math.round(Number(z.gramm)), name: z.name, treffer: finde(z.name), wahl: 0 }));
+    const liste = h("div", { class: "e-liste" }), summe = h("p", { class: "e-klein e-g-summe" });
+    const aktual = () => { const s = eSumme(zeilen.filter((r) => r.an && r.treffer[r.wahl]).map((r) => ({ g: r.g, l: r.treffer[r.wahl].l }))); summe.textContent = `Gesamt ungefähr ${zahl(Math.round(s.kcal))} kcal, Eiweiß ${zahl(eRund(s.p, 1), 1)} g, Kohlenhydrate ${zahl(eRund(s.c, 1), 1)} g, Fett ${zahl(eRund(s.f, 1), 1)} g.`; };
+    const zeichneZeilen = () => {
+      liste.replaceChildren(...zeilen.map((r) => {
+        const cb = h("input", { type: "checkbox", checked: r.an ? true : null, "aria-label": "Übernehmen" }); cb.addEventListener("change", () => { r.an = cb.checked; aktual(); });
+        const g = h("input", { type: "number", inputmode: "decimal", min: 1, max: 5000, value: r.g, "aria-label": "Gramm", style: { width: "80px" } }); g.addEventListener("input", () => { r.g = Number(g.value) || 0; aktual(); });
+        const sel = h("select", { "aria-label": "Lebensmittel" }, r.treffer.length ? r.treffer.map((t, i) => h("option", { value: i, selected: i === r.wahl ? true : null }, `${t.name} (${Math.round(t.l[0])} kcal/100 g)`)) : [h("option", { value: -1 }, "Nichts gefunden, bitte suchen")]);
+        sel.addEventListener("change", () => { r.wahl = Number(sel.value); aktual(); });
+        const such = h("input", { type: "text", class: "e-suche", value: r.name, "aria-label": "Suchbegriff", autocomplete: "off" });
+        such.addEventListener("change", () => { r.name = such.value; r.treffer = finde(r.name); r.wahl = 0; zeichneZeilen(); });
+        return h("div", { class: "e-gericht", style: { display: "block", padding: "8px 0" } }, h("div", { class: "e-zeile-oben" }, cb, such, g, h("small", null, "g")), sel);
+      })); aktual();
+    };
+    const mehr = h("button", { class: "knopf zweit", type: "button", onclick: () => { zeilen.push({ an: true, g: 100, name: "", treffer: [], wahl: 0 }); zeichneZeilen(); } }, "Zutat ergänzen");
+    const ok = h("button", { class: "knopf", type: "button", onclick: () => {
+      const gewaehlt = zeilen.filter((r) => r.an && r.g > 0 && r.treffer[r.wahl]); if (!gewaehlt.length) return;
+      const l = eTagEintraege(optionen.tag);
+      for (const r of gewaehlt) { const t = r.treffer[r.wahl]; l.push({ id: eNeueId(), mahl, name: t.name, marke: t.marke || "", g: eRund(r.g, 1), l: t.l.map((v) => eRund(v || 0, 2)), quelle: t.quelle || "", portion: null }); }
+      eTagSchreiben(optionen.tag, l); dlg.close(); optionen.fertig();
+    } }, "Hinzufügen");
+    inhalt.replaceChildren(kopf("Erkannte Zutaten", () => fotoAnsicht()), h("img", { class: "e-foto gross", src: bild, alt: "", style: { width: "100%", maxHeight: "200px", objectFit: "cover", borderRadius: "12px" } }),
+      h("p", { class: "e-klein" }, "Prüfe Mengen und Lebensmittel. Schätzungen aus Fotos sind oft zu niedrig, besonders bei Soßen und Öl."),
+      h("div", { class: "e-zeile-oben" }, mahlAuswahl()), liste, mehr, summe, h("div", { class: "knopf-zeile" }, ok));
+    zeichneZeilen();
+  }
+
   const foto = (src, klasse = "e-foto") => (src ? h("img", { class: klasse, src, alt: "" }) : h("span", { class: `${klasse} leer` }, icon("essen", 20)));
   function gerichteAnsicht() {
     const liste = eLesen(E_GERICHTE, []);
@@ -4798,7 +4885,7 @@ function eDialog(optionen) {
     inhalt.replaceChildren(kopf(zutatRueck ? "Zutat hinzufügen" : "Hinzufügen", zutatRueck ? () => { zutatRueck = null; gerichtEditor(); } : null),
       h("div", { class: "e-zeile-oben" }, mahlAuswahl()),
       feld, offKnopf,
-      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen"),
+      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: () => fotoAnsicht() }, icon("kamera", 20), "Foto erkennen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen"),
         zutatRueck ? null : h("button", { class: "knopf zweit", type: "button", onclick: gerichteAnsicht }, "Meine Gerichte")),
       status, liste);
     zeichnen();
@@ -4879,7 +4966,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 1.7.6): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 1.7.7): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
