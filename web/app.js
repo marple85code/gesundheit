@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.5.7";
+const APP_VERSION = "1.5.8";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -240,9 +240,19 @@ class SchluesselFalsch extends Error {}
 const Daten = {
   index: null,
   cache: new Map(),
+  direkt: null, // kurz nach einem Abruf: neue Dateien gleich aus dem Datenzweig holen, ohne auf die Veröffentlichung zu warten
+  async direktHolen(pfad) {
+    const d = this.direkt;
+    if (!d || Date.now() > d.bis) { this.direkt = null; return null; }
+    try {
+      const r = await fetch(`${GH_API}/repos/${d.repo}/contents/${pfad}?ref=daten`, { cache: "no-store",
+        headers: { Authorization: `Bearer ${d.token}`, Accept: "application/vnd.github.raw+json", "X-GitHub-Api-Version": "2022-11-28" } });
+      return r.ok ? r : null;
+    } catch { return null; }
+  },
   async ladeIndex() {
-    let r;
-    try { r = await fetch("d/index.enc?t=" + Date.now(), { cache: "no-store" }); } catch (e) { throw new Error("offline"); }
+    let r = await this.direktHolen("d/index.enc");
+    if (!r) try { r = await fetch("d/index.enc?t=" + Date.now(), { cache: "no-store" }); } catch (e) { throw new Error("offline"); }
     if (r.status === 404) { this.index = null; return null; }
     if (!r.ok) throw new Error("HTTP " + r.status);
     const puffer = await r.arrayBuffer();
@@ -256,7 +266,8 @@ const Daten = {
     if (!this.cache.has(pfad)) {
       const v = this.index.dateien[pfad];
       const p = (async () => {
-        const r = await fetch(`${pfad}?v=${v}`);
+        const neu = this.direkt && this.direkt.alt && this.direkt.alt[pfad] !== v;
+        const r = (neu && (await this.direktHolen(pfad))) || (await fetch(`${pfad}?v=${v}`));
         if (!r.ok) throw new Error(`${pfad}: HTTP ${r.status}`);
         return entschluesseln(pfad, await r.arrayBuffer());
       })();
@@ -3651,7 +3662,7 @@ const Sync = {
       return;
     }
     const nr = ++this.nr;
-    this.adresse = null;
+    this.adresse = null; this.direktGestartet = false;
     this.setze("startet", "Abruf wird gestartet …", "Einen Moment.");
     try {
       const runs = `/repos/${z.repo}/actions/workflows/${z.workflow}/runs?per_page=10`;
@@ -3666,8 +3677,8 @@ const Sync = {
       }
       this.setze("wartet", "Abruf angefordert", "GitHub startet ihn gleich …");
       let lauf = null;
-      for (let i = 0; i < 40 && !lauf; i++) {
-        await warte(3000);
+      for (let i = 0; i < 60 && !lauf; i++) {
+        await warte(2000);
         if (nr !== this.nr) return;
         const liste = (((await this.rufe(z, "GET", runs)) || {}).workflow_runs) || [];
         lauf = liste.find((x) => !vorher.has(x.id) && x.event === "workflow_dispatch") || null;
@@ -3682,12 +3693,26 @@ const Sync = {
       if (nr !== this.nr) return;
       const l = await this.rufe(z, "GET", `/repos/${z.repo}/actions/runs/${id}`);
       this.adresse = l.html_url || null;
+      if (l.status !== "completed" && !this.direktGestartet) {
+        // Sobald der Abruf selbst fertig und gesichert ist, die Daten direkt holen (die Veröffentlichung läuft nebenher weiter)
+        try {
+          const jobs = ((await this.rufe(z, "GET", `/repos/${z.repo}/actions/runs/${id}/jobs`)) || {}).jobs || [];
+          const abruf = jobs.find((j) => j.name === "abruf");
+          if (abruf && abruf.status === "completed" && abruf.conclusion === "success") {
+            this.direktGestartet = true;
+            Daten.direkt = { repo: z.repo, token: z.token, bis: Date.now() + 5 * 60000, alt: { ...((Daten.index && Daten.index.dateien) || {}) } };
+            speicher.set(SYNC_SPEICHER, null);
+            await this.abschluss({ conclusion: "success" }, altStand, nr);
+            return;
+          }
+        } catch { /* dann eben der bisherige Weg */ }
+      }
       if (l.status === "completed") { speicher.set(SYNC_SPEICHER, null); await this.abschluss(l, altStand, nr); return; }
       const min = Math.floor((Date.now() - beginn) / 60000);
       if (l.status === "in_progress") this.setze("laeuft", "Abruf läuft …", `Withings und Garmin werden abgefragt${min >= 1 ? ` (seit ${min} Min.)` : ""}. Das dauert meist zwei bis vier Minuten – du kannst die App weiter benutzen.`);
       else this.setze("wartet", "Abruf wartet …", "Gerade läuft schon ein Abruf. Deiner startet direkt danach.");
       if (Date.now() - beginn > 30 * 60000) { speicher.set(SYNC_SPEICHER, null); throw new SyncFehler("Der Abruf dauert ungewöhnlich lange. Schau auf der GitHub-Seite nach."); }
-      await warte(5000);
+      await warte(2500);
     }
   },
   async abschluss(l, altStand, nr) {
@@ -3697,10 +3722,10 @@ const Sync = {
       return;
     }
     this.setze("laeuft", "Abruf fertig", "Die neuen Daten werden geladen …");
-    for (let i = 0; i < 10; i++) {   // GitHub Pages braucht nach dem Abruf einen Moment
+    for (let i = 0; i < 20; i++) {   // ohne direkten Weg braucht GitHub Pages nach dem Abruf einen Moment
       try { await Daten.ladeIndex(); } catch { /* gleich noch einmal */ }
       if (Daten.index && Daten.index.stand !== altStand) break;
-      await warte(6000);
+      await warte(2500);
       if (nr !== this.nr) return;
     }
     Daten.cache.clear(); standZeigen(); neuZeichnen();
@@ -3722,7 +3747,7 @@ const Sync = {
     if (!g || !g.id || Date.now() - g.beginn > 30 * 60000) { speicher.set(SYNC_SPEICHER, null); return; }
     const z = await this.zugang();
     if (!z) return;
-    const nr = ++this.nr;
+    const nr = ++this.nr; this.direktGestartet = false;
     this.setze("laeuft", "Abruf läuft …", "Der zuletzt gestartete Abruf wird weiter verfolgt.");
     try { await this.verfolgen(z, g.id, g.beginn, nr, g.alt); } catch (e) { if (nr === this.nr) this.fehler(e); }
   },
