@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.0.2";
+const APP_VERSION = "2.0.3";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1966,6 +1966,23 @@ function sportMenue(a) {
   dlg.addEventListener("click", (e) => { if (e.target === dlg) zu(); });
   dlg.addEventListener("close", () => dlg.remove());
   start();
+  document.body.append(dlg); dlg.showModal();
+}
+/** Kleines Menü (Duplizieren, Entfernen) nach langem Drücken */
+function aktionsMenue(titel, duplizieren, entfernen) {
+  const dlg = h("dialog", { class: "blatt-dialog e-dialog", "aria-label": titel });
+  const inhalt = h("div", { class: "dialog-inhalt" });
+  const zu = () => dlg.close();
+  const kopf = () => h("div", { class: "dialog-kopf" }, h("h2", null, titel), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: zu }, icon("zu", 20)));
+  const start = () => inhalt.replaceChildren(kopf(), h("div", { class: "knopf-zeile" },
+    h("button", { class: "knopf", type: "button", onclick: () => { zu(); duplizieren(); } }, "Duplizieren"),
+    h("button", { class: "knopf zweit", type: "button", style: { color: "#ff3b30" }, onclick: fragen }, "Entfernen")));
+  const fragen = () => inhalt.replaceChildren(kopf(), h("p", { class: "e-klein" }, "Wirklich entfernen? Das gilt auch auf deinen anderen Geräten."),
+    h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", style: { background: "#ff3b30" }, onclick: () => { zu(); entfernen(); } }, "Entfernen"),
+      h("button", { class: "knopf zweit", type: "button", onclick: start }, "Abbrechen")));
+  dlg.append(inhalt); start();
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) zu(); });
+  dlg.addEventListener("close", () => dlg.remove());
   document.body.append(dlg); dlg.showModal();
 }
 function langerDruck(el, fn) {
@@ -4879,10 +4896,15 @@ function eDialog(optionen) {
       h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => { entwurf = null; gerichtEditor(null); } }, "Neues Gericht anlegen")),
       h("div", { class: "e-liste" }, liste.length ? liste.map((g) => {
         const lm = eGerichtLm(g), kcal = Math.round(lm.l[0] * lm.portion.g / 100);
-        return h("div", { class: "e-gericht" },
-          h("button", { type: "button", class: "e-treffer e-gericht-wahl", onclick: () => mengeAnsicht(lm, null) }, foto(g.foto),
+        const wahlKnopf = h("button", { type: "button", class: "e-treffer e-gericht-wahl", onclick: () => mengeAnsicht(lm, null) }, foto(g.foto),
             h("span", { class: "e-g-text" }, h("span", { class: "e-t-name" }, g.name), h("span", { class: "e-t-sub" }, `${g.zutaten.length} Zutaten · ${zahl(Number(g.portionen) || 1)} Portion${(Number(g.portionen) || 1) === 1 ? "" : "en"}`)),
-            h("span", { class: "e-t-kcal" }, `${zahl(kcal)} kcal`, h("small", null, " / Portion"))),
+            h("span", { class: "e-t-kcal" }, `${zahl(kcal)} kcal`, h("small", null, " / Portion")));
+        langerDruck(wahlKnopf, () => aktionsMenue(g.name, () => {
+          const lg = eLesen(E_GERICHTE, []), i = lg.findIndex((x) => x.id === g.id);
+          lg.splice(i >= 0 ? i + 1 : lg.length, 0, { ...JSON.parse(JSON.stringify(g)), id: eNeueId(), name: `${g.name} (Kopie)` });
+          speicher.set(E_GERICHTE, JSON.stringify(lg)); eGerichteGeaendert(); gerichteAnsicht();
+        }, () => { speicher.set(E_GERICHTE, JSON.stringify(eLesen(E_GERICHTE, []).filter((x) => x.id !== g.id))); eGerichteGeaendert(); gerichteAnsicht(); }));
+        return h("div", { class: "e-gericht" }, wahlKnopf,
           h("button", { type: "button", class: "e-link", onclick: () => { entwurf = null; gerichtEditor(g); } }, "Bearbeiten"));
       }) : null));
   }
@@ -5056,9 +5078,15 @@ function eTagBauen(box, tag) {
         h("button", { type: "button", class: "e-plus", "aria-label": `${name}: Lebensmittel hinzufügen`, onclick: () => eDialog({ tag, mahl: id, fertig: () => eTagBauen(box, tag) }) }, "+")),
       l.length ? h("ul", { class: "e-eintraege" }, l.map((e) => {
         const w = eWerte(e);
-        return h("li", null, h("button", { type: "button", onclick: () => eDialog({ tag, mahl: id, eintrag: e, fertig: () => eTagBauen(box, tag) }) },
+        const knopf = h("button", { type: "button", onclick: () => eDialog({ tag, mahl: id, eintrag: e, fertig: () => eTagBauen(box, tag) }) },
           h("span", { class: "e-e-name" }, e.name), h("span", { class: "e-e-sub" }, `${zahl(e.g)} g · Eiweiß ${zahl(w[1], 1)} · KH ${zahl(w[3], 1)} · Fett ${zahl(w[2], 1)}`),
-          h("span", { class: "e-e-kcal" }, zahl(Math.round(w[0])))));
+          h("span", { class: "e-e-kcal" }, zahl(Math.round(w[0]))));
+        langerDruck(knopf, () => aktionsMenue(e.name, () => {
+          const l2 = eTagEintraege(tag), i = l2.findIndex((x) => x.id === e.id);
+          l2.splice(i >= 0 ? i + 1 : l2.length, 0, { ...JSON.parse(JSON.stringify(e)), id: eNeueId() });
+          eTagSchreiben(tag, l2); eTagBauen(box, tag);
+        }, () => { eTagSchreiben(tag, eTagEintraege(tag).filter((x) => x.id !== e.id)); eTagBauen(box, tag); }));
+        return h("li", null, knopf);
       })) : null);
   });
   box.replaceChildren(uebersicht, ...mahlzeiten);
@@ -5079,7 +5107,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.0.2): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.0.3): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
