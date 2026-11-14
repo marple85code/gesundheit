@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.5.2";
+const APP_VERSION = "1.5.3";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -3652,7 +3652,7 @@ const Sync = {
   zeigen() {
     if (!SYNC_KNOPF) return;
     const z = this.zustand;
-    SYNC_KNOPF.className = `sync-knopf ${z}`;
+    SYNC_KNOPF.className = `sync-knopf ${z}${z === "fehler" || (z === "bereit" && this.zuletzt && this.zuletzt.zustand === "fehler") ? " rot" : ""}`;
     SYNC_KNOPF.setAttribute("aria-label", this.laeuft() ? "Abruf läuft" : "Jetzt abrufen");
     SYNC_KNOPF.disabled = false;
     clearTimeout(this.ausblenden);
@@ -4675,6 +4675,7 @@ function standZeigen() {
   let art = "";
   if (liste.some((x) => x.anmeldung_noetig || x.ok === false)) art = "fehler";
   else if (liste.some((x) => x.fehler) || stundenSeitAbruf() > 3) art = "warnung";
+  STAND.classList.toggle("rot", art === "fehler");
   STAND.replaceChildren(h("span", { class: `stand-punkt ${art}`, "aria-hidden": "true" }),
     h("span", { class: "stand-lang" }, vorZeit(Daten.index.stand)), h("span", { class: "stand-kurz", "aria-hidden": "true" }, vorZeit(Daten.index.stand, true)),
     h("span", { class: "stand-version" }, `v${APP_VERSION}`));

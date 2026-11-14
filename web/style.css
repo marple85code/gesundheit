@@ -938,3 +938,10 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .kopf-aktion[hidden] { display: none; }
 .kopf-aktion .ka-plus { font-size: 18px; line-height: 1; }
 @media (max-width: 520px) { .kopf-aktion { padding: 0; width: 34px; height: 34px; justify-content: center; } .kopf-aktion .ka-text { display: none; } .kopf-aktion .ka-plus { font-size: 22px; } }
+.sync-knopf.rot { background: #ff3b30; border-color: #ff3b30; color: #fff; }
+.sync-knopf.rot .sync-punkt { display: none; }
+.stand.rot { background: #ff3b30; border-color: #ff3b30; color: #fff; }
+.stand.rot .stand-punkt { background: #fff; }
+.stand.rot .stand-version { border-left-color: rgba(255,255,255,.5); color: #fff; }
+.sync-meldung.fehler { background: color-mix(in srgb, #ff3b30 12%, var(--blatt)); border-color: #ff3b30; }
+.sync-meldung.fehler b { color: #d70015; }
