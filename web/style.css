@@ -40,7 +40,7 @@
   --serie-5: #e87ba4; --serie-6: #008300; --serie-7: #6250d6; --serie-8: #e34948;
   --serie-grau: #a7b1b4;
   /* Schlafphasen (Wach -> Tief) und Pulszonen (1 -> 5), je ein Farbton */
-  --phase-wach: #86b6ef; --phase-rem: #5598e7; --phase-leicht: #256abf; --phase-tief: #104281;
+  --phase-wach: #ffcc00; --phase-rem: #30d158; --phase-leicht: #32ade6; --phase-tief: #1d3f8f;
   --zone-1: #86b6ef; --zone-2: #5598e7; --zone-3: #2a78d6; --zone-4: #1c5cab; --zone-5: #104281;
   /* Zustand (fest, immer mit Text) */
   --gut: #0ca30c; --gut-text: #006300; --warnung: #fab219; --warnung-text: #7d5300; --ernst: #ec835a; --kritisch: #d03b3b; --kritisch-text: #b02a2a;
@@ -64,7 +64,7 @@
     --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
     --serie-5: #d55181; --serie-6: #008300; --serie-7: #9085e9; --serie-8: #e66767;
     --serie-grau: #56656b;
-    --phase-wach: #184f95; --phase-rem: #2a78d6; --phase-leicht: #6da7ec; --phase-tief: #b7d3f6;
+    --phase-wach: #ffd60a; --phase-rem: #30d158; --phase-leicht: #5ac8fa; --phase-tief: #4a6bd6;
     --zone-1: #184f95; --zone-2: #256abf; --zone-3: #3987e5; --zone-4: #6da7ec; --zone-5: #9ec5f4;
     --gut-text: #0ca30c; --kritisch-text: #ff8a80; --warnung-text: #f4c55a;
   }
@@ -79,7 +79,7 @@
   --serie-1: #3987e5; --serie-2: #d95926; --serie-3: #199e70; --serie-4: #c98500;
   --serie-5: #d55181; --serie-6: #008300; --serie-7: #9085e9; --serie-8: #e66767;
   --serie-grau: #56656b;
-  --phase-wach: #184f95; --phase-rem: #2a78d6; --phase-leicht: #6da7ec; --phase-tief: #b7d3f6;
+  --phase-wach: #ffd60a; --phase-rem: #30d158; --phase-leicht: #5ac8fa; --phase-tief: #4a6bd6;
   --zone-1: #184f95; --zone-2: #256abf; --zone-3: #3987e5; --zone-4: #6da7ec; --zone-5: #9ec5f4;
   --gut-text: #0ca30c; --kritisch-text: #ff8a80; --warnung-text: #f4c55a;
 }

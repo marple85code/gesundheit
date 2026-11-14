@@ -18,7 +18,7 @@ const F = {
 const P = {
   tinte: "#12262e", tinte2: "#4a5b62", tinte3: "#5f6c72", linie: "#dce3e3", stark: "#c3ccce",
   serie: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"],
-  phasen: ["#104281", "#256abf", "#5598e7", "#86b6ef"], // tief, leicht, REM, wach
+  phasen: ["#1d3f8f", "#32ade6", "#30d158", "#ffcc00"], // tief, leicht, REM, wach
 };
 // Zeichen, die die eingebettete Schrift kennt (Atkinson Hyperlegible Next, Latein)
 const ERLAUBT = "20-7e,a0-ac,ae-b4,b6-107,10a-113,116-11b,11e-123,126-127,12a-12b,12e-133,136-137,139-13e,141-148,150-155,158-15b,15e-165,16a-16b,16e-17e,2013-2014,2018-201a,201c-201e,2020-2022,2026,2030,2039-203a,20ac,2122,2212,2264-2265"
@@ -33,7 +33,7 @@ function t(s) {
 }
 
 let C, O, doc, y;
-const VERSION = "1.6.0";
+const VERSION = "1.6.1";
 
 // Diese Hilfen gibt die App seit Version 1.2.2 mit. Eine ältere App, die nach einem Update kurz
 // diesen neueren Berichtsteil lädt, kennt sie noch nicht – dann gelten diese gleichlautenden Fassungen.
