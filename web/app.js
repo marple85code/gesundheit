@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.6.5";
+const APP_VERSION = "1.7.0";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -89,6 +89,7 @@ const ICON = {
   sonst: '<path d="M2.5 12h4l2-5 3.5 10 2.5-7 1.5 2h5.5"/>',
   sync: '<path d="M19.4 9.2A7.6 7.6 0 0 0 5.3 7.6M4.6 14.8a7.6 7.6 0 0 0 14.1 1.6"/><path d="M5 3.6v4.3h4.3M19 20.4v-4.3h-4.3"/>',
   haken: '<path d="m5.5 12.5 4.2 4.2 8.8-9.4"/>',
+  auswertung: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   bericht: '<path d="M6.5 2.8h7.6l4.4 4.4v14H6.5Z"/><path d="M14 2.8v4.6h4.5M9.4 12.4h6.2M9.4 15.6h6.2M9.4 18.8h3.8"/>',
   marke: '<rect x="1.5" y="1.5" width="21" height="21" rx="6" fill="currentColor" stroke="none"/><path d="M5 12.6h3l1.5-3.6 2.6 7.4 2-5.2 1.1 1.4H19" stroke="var(--rose)" stroke-width="1.9"/>',
   achtung: '<circle cx="12" cy="12" r="9.8" fill="currentColor" stroke="none"/><path d="M12 6.8v6.8" stroke="#fff" stroke-width="2.6"/><circle cx="12" cy="17.2" r="1.5" fill="#fff" stroke="none"/>',
@@ -1891,7 +1892,9 @@ async function ansichtHeute() {
       akt.length > 4 ? h("div", { class: "knopf-zeile" }, h("a", { class: "knopf zweit", href: "#sport" }, "Alle Aktivitäten")) : null));
   }
   if (!Daten.index.eingerichtet) knoten.push(hinweis("Withings und Garmin sind noch nicht verbunden. Starte auf dem Chromebook das Einrichtungsfenster und folge den Schritten."));
-  else knoten.push(h("div", { class: "abschnitt" }, h("a", { class: "bericht-link", href: "#bericht" }, icon("bericht", 22),
+  else knoten.push(h("div", { class: "abschnitt" }, h("a", { class: "bericht-link", href: "#auswertung", style: { marginBottom: "10px" } }, icon("auswertung", 22),
+    h("span", null, h("b", null, "Auswertungen"), h("span", null, "Wochenrückblick, Gewichtsprognose, Bestwerte, Rollentrainer, Ziele")), icon("vor", 20)),
+    h("a", { class: "bericht-link", href: "#bericht" }, icon("bericht", 22),
     h("span", null, h("b", null, "Arztbericht als PDF"), h("span", null, "Blutdruck, EKG, Körper, Schlaf und Aktivität für den nächsten Termin")), icon("vor", 20))));
   return { titel: "Heute", knoten };
 }
@@ -4862,9 +4865,181 @@ async function ansichtEssen() {
     knoten: [tagBox, klappAbschnitt("rechner", "Kalorienziel berechnen", "Größe, Alter, Bewegung und Ziel", ...rechner)] };
 }
 
+// ======================================================================
+// Auswertungen (neu in 1.7.0): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// ======================================================================
+const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
+function regression(p_) {
+  const n = p_.length; if (n < 3) return null;
+  const mx = mittel(p_.map((p) => p[0])), my = mittel(p_.map((p) => p[1]));
+  let a = 0, b = 0; for (const [x, y] of p_) { a += (x - mx) * (y - my); b += (x - mx) ** 2; }
+  const m = b ? a / b : 0; return { m, c: my - m * mx };
+}
+function wocheStart(iso) { const d = new Date(tagMs(iso)); const wt = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wt); return isoDatum(d); }
+function kart(titel, ...inhalt) { return h("section", { class: "form-karte" }, h("div", { class: "form-kopf" }, h("div", null, h("span", { class: "form-titel" }, titel))), ...inhalt); }
+function zeile(a, b, farbe) { return h("div", { style: { display: "flex", justifyContent: "space-between", padding: "5px 0", gap: "12px" } }, h("span", null, a), h("b", { style: farbe ? { color: farbe } : {} }, b)); }
+function kurzTempo(ms) { if (!ms) return "–"; const sek = 1000 / ms; return `${Math.floor(sek / 60)}:${String(Math.round(sek % 60)).padStart(2, "0")} min/km`; }
+
+async function ansichtAuswertung() {
+  const heute = heuteIso();
+  const [w, akt] = await Promise.all([Daten.withings(), Daten.aktivitaeten()]);
+  const k = await kennzahlen(["schritte", "schrittziel", "hrv", "ruhepuls", "fitnessalter", "vo2lauf", "trinken", "schlaf_dauer"], isoMinus(120));
+  const knoten = [h("p", { class: "begruessung" }, "Zusammenhänge, Bestwerte und Muster aus deinen eigenen Daten. Alles wird auf diesem Gerät gerechnet.")];
+
+  // ---- Wochenrückblick
+  const ws = wocheStart(heute), wsV = isoMinus(Math.round((tagMs(heute) - tagMs(ws)) / 86400000) + 7);
+  const inWoche = (a_, v, b) => { const d = String(a_.start).slice(0, 10); return d >= v && d < b; };
+  const sumW = (v, b) => ({
+    km: akt.filter((a_) => inWoche(a_, v, b)).reduce((x, a_) => x + (a_.distanz || 0) / 1000, 0),
+    min: akt.filter((a_) => inWoche(a_, v, b)).reduce((x, a_) => x + (a_.dauer || 0) / 60, 0),
+    n: akt.filter((a_) => inWoche(a_, v, b)).length,
+    schritte: (k.schritte || []).filter((p) => p[0] >= v && p[0] < b).reduce((x, p) => x + p[1], 0),
+    schlaf: mittel((k.schlaf_dauer || []).filter((p) => p[0] >= v && p[0] < b).map((p) => p[1])),
+  });
+  const naechste = isoMinus(-1), dieW = sumW(ws, naechste), vorW = sumW(wsV, ws);
+  const diff = (a, b, u, st = 0) => (b ? `${a - b >= 0 ? "+" : "−"}${zahl(Math.abs(a - b), st)} ${u}` : "–");
+  knoten.push(kart("Wochenrückblick (seit Montag)",
+    zeile("Aktivitäten", `${dieW.n} (${diff(dieW.n, vorW.n, "")} zur Vorwoche)`),
+    zeile("Distanz", `${zahl(dieW.km, 1)} km (${diff(dieW.km, vorW.km, "km", 1)})`),
+    zeile("Trainingszeit", `${zahl(Math.round(dieW.min))} Min. (${diff(dieW.min, vorW.min, "Min.")})`),
+    zeile("Schritte", `${zahl(Math.round(dieW.schritte))} (${diff(dieW.schritte, vorW.schritte, "")})`),
+    dieW.schlaf != null ? zeile("Schlaf im Schnitt", `${zahl(dieW.schlaf, 1)} Std.`) : null));
+
+  // ---- Gewichtsprognose
+  const g = wTaeglich(wReihe(w, 1)).filter((p) => p[0] >= isoMinus(42)).map(([d, v]) => [tagMs(d) / 86400000, v]);
+  const reg = regression(g);
+  if (reg) {
+    const jetzt = heuteIso(), t0 = tagMs(jetzt) / 86400000;
+    const proWoche = reg.m * 7, in4 = reg.m * (t0 + 28) + reg.c;
+    knoten.push(kart("Gewichtsprognose",
+      h("b", { style: { fontSize: "28px" } }, `${zahl(in4, 1)} kg`),
+      h("p", null, `In 4 Wochen, wenn es so weitergeht wie in den letzten 6 Wochen (${proWoche >= 0 ? "+" : "−"}${zahl(Math.abs(proWoche), 2)} kg pro Woche).`),
+      funke([...g.map((p) => [p[0] * 86400000, p[1]]), [(t0 + 28) * 86400000, in4]], 300, 60)));
+  }
+
+  // ---- Zusammenhang Training und HRV
+  const hrv = new Map(k.hrv || []), ruhe = new Map(k.ruhepuls || []);
+  const tageMitLast = new Set(akt.filter((a_) => (a_.dauer || 0) >= 2400 && (a_.hf || 0) >= 120).map((a_) => String(a_.start).slice(0, 10)));
+  const nach = [], sonst = [];
+  for (const [d, v] of hrv) { const vortag = isoDatum(new Date(tagMs(d) - 86400000)); (tageMitLast.has(vortag) ? nach : sonst).push(v); }
+  if (nach.length >= 4 && sonst.length >= 8) {
+    const a = mittel(nach), b = mittel(sonst), p = Math.round(((a - b) / b) * 100);
+    knoten.push(kart("Training und HRV", h("b", null, Math.abs(p) < 3 ? "Kein deutlicher Zusammenhang" : p < 0 ? `Nach längeren, fordernden Einheiten sinkt die HRV um ${Math.abs(p)} %` : `Nach längeren, fordernden Einheiten liegt die HRV ${p} % höher`),
+      h("p", null, `${zahl(a)} ms nach Training (${nach.length} Nächte) gegenüber ${zahl(b)} ms sonst (${sonst.length} Nächte). Beobachtung, kein Beweis.`)));
+  }
+
+  // ---- Bestwerte und Serien
+  const lauf = akt.filter((a_) => sportIcon(a_.typ) === "lauf" && a_.distanz >= 4500 && a_.tempo);
+  const best = [];
+  if (lauf.length) { const a_ = lauf.reduce((x, y) => (y.tempo > x.tempo ? y : x)); best.push(["Schnellstes Tempo (ab 4,5 km)", `${kurzTempo(a_.tempo)} · ${datum(String(a_.start).slice(0, 10), "kurz")}`]); }
+  for (const [gruppe, name] of [["lauf", "Längster Lauf"], ["fahrrad", "Längste Radfahrt"], ["wandern", "Längste Wanderung"]]) {
+    const l = akt.filter((a_) => sportIcon(a_.typ) === gruppe && a_.distanz);
+    if (l.length) { const a_ = l.reduce((x, y) => (y.distanz > x.distanz ? y : x)); best.push([name, `${zahl(a_.distanz / 1000, 1)} km · ${datum(String(a_.start).slice(0, 10), "kurz")}`]); }
+  }
+  const hm = akt.filter((a_) => a_.auf); if (hm.length) { const a_ = hm.reduce((x, y) => (y.auf > x.auf ? y : x)); best.push(["Meiste Höhenmeter", `${zahl(Math.round(a_.auf))} m · ${datum(String(a_.start).slice(0, 10), "kurz")}`]); }
+  const wochenMit = new Set(akt.map((a_) => wocheStart(String(a_.start).slice(0, 10))));
+  let serie = 0; { let d = ws; if (!wochenMit.has(d)) d = isoDatum(new Date(tagMs(d) - 7 * 86400000)); while (wochenMit.has(d)) { serie++; d = isoDatum(new Date(tagMs(d) - 7 * 86400000)); } }
+  let tageSerie = 0; { const ziel = new Map((k.schrittziel || [])); let d = heute; if (!(amTag(k.schritte, d) >= (amTag(k.schrittziel, d) || Infinity))) d = isoMinus(1); while (amTag(k.schritte, d) != null && amTag(k.schritte, d) >= (ziel.get(d) || 8000)) { tageSerie++; d = isoDatum(new Date(tagMs(d) - 86400000)); } }
+  knoten.push(kart("Bestwerte und Serien", ...best.map(([a, b]) => zeile(a, b)), zeile("Wochen in Folge mit Training", `${serie}`, serie >= 3 ? "#34c759" : null), zeile("Tage in Folge mit erreichtem Schrittziel", `${tageSerie}`, tageSerie >= 3 ? "#34c759" : null)));
+
+  // ---- Rollentrainer
+  const indoor = akt.filter((a_) => ["indoor_cycling", "virtual_ride", "indoor_bike"].includes(a_.typ)).sort((a, b) => (a.start < b.start ? 1 : -1));
+  if (indoor.length) {
+    const a_ = indoor[0];
+    const liste = indoor.slice(0, 8).map((x) => h("a", { href: `#aktivitaet/${x.id}`, style: { display: "flex", justifyContent: "space-between", padding: "5px 0", color: "inherit", textDecoration: "none" } }, h("span", null, datum(String(x.start).slice(0, 10), "kurz")), h("span", null, `${zahl(Math.round((x.dauer || 0) / 60))} Min.`), h("b", null, x.leistung ? `${zahl(Math.round(x.leistung))} W` : "–")));
+    const kg = (letzter(wReihe(w, 1)) || [])[1];
+    knoten.push(kart("Rollentrainer", h("b", { style: { fontSize: "26px" } }, `${zahl(Math.round((a_.dauer || 0) / 60))} Min.`),
+      h("p", null, `Letzte Einheit ${datum(String(a_.start).slice(0, 10), "kurz")}: Ø ${a_.leistung ? zahl(Math.round(a_.leistung)) : "–"} W${a_.np ? `, Normalized ${zahl(Math.round(a_.np))} W` : ""}${a_.kad_rad ? `, ${zahl(Math.round(a_.kad_rad))} U/min` : ""}${a_.hf ? `, Puls ${zahl(Math.round(a_.hf))}` : ""}${a_.leistung && kg ? `, ${zahl(a_.leistung / kg, 1)} W/kg` : ""}.`),
+      ...liste));
+  }
+
+  // ---- Streckenvergleich
+  const grp = new Map();
+  for (const a_ of akt) { if (!a_.distanz || !a_.ort || !["lauf", "fahrrad", "wandern", "gehen"].includes(sportIcon(a_.typ))) continue; const key = `${a_.ort}|${sportIcon(a_.typ)}|${Math.round(a_.distanz / 1000 / 1.5)}`; (grp.get(key) || grp.set(key, []).get(key)).push(a_); }
+  const wieder = [...grp.values()].filter((l) => l.length >= 3).sort((a, b) => b.length - a.length).slice(0, 3);
+  if (wieder.length) knoten.push(kart("Gleiche Strecken im Vergleich", ...wieder.map((l) => { const s_ = l.sort((a, b) => (a.start < b.start ? -1 : 1)); const erst = s_[0], jetztA = s_[s_.length - 1]; const bestA = s_.reduce((x, y) => (y.tempo > x.tempo ? y : x));
+    return h("div", { style: { padding: "6px 0" } }, h("b", null, `${l[0].ort || "Strecke"}, ca. ${zahl(l[0].distanz / 1000, 1)} km (${l.length}x)`), h("p", null, `Zuletzt ${kurzTempo(jetztA.tempo)}, erstes Mal ${kurzTempo(erst.tempo)}, bestes ${kurzTempo(bestA.tempo)}.`)); })));
+
+  // ---- Ausrüstung (Kilometerzähler)
+  const ausr = eLesen(A_AUSR, []);
+  const kmSeit = (e) => akt.filter((a_) => sportIcon(a_.typ) === e.art && String(a_.start).slice(0, 10) >= e.ab).reduce((x, a_) => x + (a_.distanz || 0) / 1000, 0);
+  const ausrBox = h("div");
+  const ausrZeigen = () => ausrBox.replaceChildren(...ausr.map((e, i) => { const km = kmSeit(e); const rot = e.limit && km >= e.limit; return h("div", { style: { padding: "6px 0" } },
+    zeile(`${e.name} (${{ lauf: "Laufen", fahrrad: "Rad", wandern: "Wandern" }[e.art]})`, `${zahl(km, 0)}${e.limit ? ` / ${e.limit}` : ""} km`, rot ? "#ff9f0a" : null),
+    h("button", { type: "button", class: "knopf", onclick: () => { ausr.splice(i, 1); speicher.set(A_AUSR, JSON.stringify(ausr)); ausrZeigen(); } }, "Entfernen")); }));
+  ausrZeigen();
+  knoten.push(kart("Ausrüstung", h("p", null, "Zählt die Kilometer deiner Aktivitäten ab einem Datum, zum Beispiel für Schuhe oder die Kette."), ausrBox,
+    h("button", { type: "button", class: "knopf", onclick: () => {
+      const name = prompt("Name der Ausrüstung, zum Beispiel Laufschuhe"); if (!name) return;
+      const art = (prompt("Sportart: lauf, fahrrad oder wandern", "lauf") || "lauf").trim();
+      const ab = prompt("Ab welchem Datum zählen? (JJJJ-MM-TT)", heute) || heute;
+      const limit = Number(prompt("Warnung bei wie vielen Kilometern? (leer lassen für keine)", "700")) || 0;
+      ausr.push({ name, art: ["lauf", "fahrrad", "wandern"].includes(art) ? art : "lauf", ab, limit }); speicher.set(A_AUSR, JSON.stringify(ausr)); ausrZeigen(); } }, "Ausrüstung hinzufügen")));
+
+  // ---- Blutdruck nach Tageszeit
+  const bp = blutdruckMessungen(w).filter((m) => m.ts >= tagMs(isoMinus(90)));
+  if (bp.length >= 4) {
+    const mo = bp.filter((m) => istMorgens(m.ts)), ab = bp.filter((m) => !istMorgens(m.ts));
+    knoten.push(kart("Blutdruck nach Tageszeit (90 Tage)",
+      mo.length ? zeile("Morgens", `${zahl(mittel(mo.map((m) => m.sys)))}/${zahl(mittel(mo.map((m) => m.dia)))} (${mo.length} Messungen)`) : null,
+      ab.length ? zeile("Abends", `${zahl(mittel(ab.map((m) => m.sys)))}/${zahl(mittel(ab.map((m) => m.dia)))} (${ab.length} Messungen)`) : null,
+      h("p", null, "Hilfreich für das Gespräch mit der Ärztin oder dem Arzt. Kein medizinischer Befund.")));
+  }
+
+  // ---- Körperzusammensetzung und Fitnessalter
+  const fett = wTaeglich(wReihe(w, 6)), musk = wTaeglich(wReihe(w, 76));
+  if (fett.length || musk.length || (k.fitnessalter || []).length) {
+    const dv = (r, tage) => { if (!r.length) return null; const l = r[r.length - 1][1]; const alt = vorTagen(r.map(([d, v]) => [d, v]), tage); return alt == null ? null : l - alt; };
+    const pf = (v, st, u) => (v == null ? "" : ` (${v >= 0 ? "+" : "−"}${zahl(Math.abs(v), st)} ${u} in 30 Tagen)`);
+    knoten.push(kart("Körper und Fitness",
+      fett.length ? zeile("Körperfett", `${zahl(fett[fett.length - 1][1], 1)} %${pf(dv(fett, 30), 1, "%")}`) : null,
+      musk.length ? zeile("Muskelmasse", `${zahl(musk[musk.length - 1][1], 1)} kg${pf(dv(musk, 30), 1, "kg")}`) : null,
+      (k.fitnessalter || []).length ? zeile("Fitnessalter", `${zahl(letzter(k.fitnessalter)[1], 0)} Jahre`) : null,
+      (k.vo2lauf || []).length ? zeile("VO₂max Laufen", zahl(letzter(k.vo2lauf)[1], 1)) : null));
+  }
+
+  // ---- Ernährung: Wochenschnitt, Lieblingsgerichte, Trinken
+  const tage = eLesen(E_TAGE, {}); const n7 = [];
+  for (let i = 0; i < 7; i++) { const d = isoMinus(i); if ((tage[d] || []).length) n7.push(eSumme(tage[d])); }
+  const zaehl = new Map();
+  for (const d of Object.keys(tage)) if (d >= isoMinus(60)) for (const e of tage[d] || []) { const n = e.n || e.name; if (n) zaehl.set(n, (zaehl.get(n) || 0) + 1); }
+  const top = [...zaehl.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const trink = (k.trinken || []).filter((p) => p[0] >= isoMinus(7));
+  if (n7.length || top.length || trink.length) knoten.push(kart("Ernährung",
+    n7.length ? h("div", null, zeile(`Ø pro Tag (${n7.length} Tage mit Einträgen)`, `${zahl(Math.round(mittel(n7.map((x) => x.kcal))))} kcal`),
+      zeile("Eiweiß", `${zahl(Math.round(mittel(n7.map((x) => x.p))))} g`, "#ff3b30"), zeile("Kohlenhydrate", `${zahl(Math.round(mittel(n7.map((x) => x.c))))} g`, "#0a84ff"), zeile("Fett", `${zahl(Math.round(mittel(n7.map((x) => x.f))))} g`, "#ff9f0a")) : null,
+    top.length ? h("div", null, h("b", null, "Häufigste Lebensmittel (60 Tage)"), ...top.map(([n, c]) => zeile(n, `${c}x`))) : null,
+    trink.length ? zeile("Getrunken im Schnitt (7 Tage)", `${zahl(Math.round(mittel(trink.map((p) => p[1]))))} ml`) : null));
+
+  // ---- Ziele
+  const ziele = eLesen(A_ZIELE, []);
+  const zBox = h("div");
+  const istWert = (z) => z.art === "gewicht" ? (letzter(wReihe(w, 1)) || [])[1] : z.art === "sport" ? sumW(ws, naechste).min : null;
+  const zZeigen = () => zBox.replaceChildren(...ziele.map((z, i) => { const ist = istWert(z); let anteil = 0, text = "";
+    if (z.art === "gewicht") { const start = z.start; anteil = ist != null && start !== z.ziel ? (start - ist) / (start - z.ziel) : 0; text = `${zahl(ist, 1)} kg aktuell, Ziel ${zahl(z.ziel, 1)} kg`; }
+    else { anteil = (ist || 0) / z.ziel; text = `${zahl(Math.round(ist || 0))} von ${zahl(z.ziel)} Min. diese Woche`; }
+    anteil = Math.max(0, Math.min(1, anteil));
+    return h("div", { style: { padding: "6px 0" } }, h("b", null, z.art === "gewicht" ? `Gewicht auf ${zahl(z.ziel, 1)} kg` : `${zahl(z.ziel)} Min. Sport pro Woche`),
+      h("div", { class: "form-balken" }, h("i", { style: { width: `${Math.round(anteil * 100)}%`, background: "#34c759" } })), h("p", null, text),
+      h("button", { type: "button", class: "knopf", onclick: () => { ziele.splice(i, 1); speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); } }, "Entfernen")); }));
+  zZeigen();
+  knoten.push(kart("Ziele", zBox, h("button", { type: "button", class: "knopf", onclick: () => {
+    const art = (prompt("Zieltyp: gewicht oder sport", "gewicht") || "").trim();
+    if (art === "gewicht") { const z = Number((prompt("Zielgewicht in kg") || "").replace(",", ".")); const st = (letzter(wReihe(w, 1)) || [])[1]; if (z && st) { ziele.push({ art, ziel: z, start: st }); } }
+    else if (art === "sport") { const z = Number(prompt("Trainingsminuten pro Woche", "150")); if (z) ziele.push({ art, ziel: z }); }
+    speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); } }, "Ziel hinzufügen")));
+
+  // ---- Sichern
+  knoten.push(kart("Eigene Einträge sichern", h("p", null, "Speichert Essenstagebuch, eigene Gerichte, Ziele und Ausrüstung dieses Geräts als Datei. Gesundheitsdaten bleiben verschlüsselt im Online-Speicher und sind davon nicht betroffen."),
+    h("button", { type: "button", class: "knopf", onclick: () => {
+      const out = {}; try { for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i); if (key.startsWith("gesundheit.ernaehrung") || key.startsWith("gesundheit.auswertung") || key === S_DOPPELT) out[key] = localStorage.getItem(key); } } catch { /* leer */ }
+      const a_ = h("a", { href: URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" })), download: `gawi-sicherung-${heute}.json` }); document.body.append(a_); a_.click(); a_.remove(); } }, "Sicherung herunterladen")));
+  return { titel: "Auswertungen", knoten };
+}
+
 const NAV = [["essen", "Essen"], ["heute", "Heute"], ["koerper", "Körper"], ["herz", "Herz"], ["schlaf", "Schlaf"], ["sport", "Sport"], ["hinweise", "Hinweise"]];
-const MEHR = [["bericht", "Arztbericht (PDF)", "Alle wichtigen Werte für die Ärztin oder den Arzt"], ["tag", "Tag im Detail", "Puls, Stress, Body Battery und Schlaf eines Tages"], ["werte", "Alle Werte", "Jede Messgröße einzeln, mit Rohdaten"], ["status", "Status", "Abrufe, Verbindung und Darstellung"]];
-const ANSICHTEN = { essen: ansichtEssen, heute: ansichtHeute, koerper: ansichtKoerper, herz: ansichtHerz, schlaf: ansichtSchlaf, sport: ansichtSport, hinweise: ansichtHinweise,
+const MEHR = [["auswertung", "Auswertungen", "Wochenrückblick, Prognose, Bestwerte, Ziele und mehr"], ["bericht", "Arztbericht (PDF)", "Alle wichtigen Werte für die Ärztin oder den Arzt"], ["tag", "Tag im Detail", "Puls, Stress, Body Battery und Schlaf eines Tages"], ["werte", "Alle Werte", "Jede Messgröße einzeln, mit Rohdaten"], ["status", "Status", "Abrufe, Verbindung und Darstellung"]];
+const ANSICHTEN = { essen: ansichtEssen, heute: ansichtHeute, koerper: ansichtKoerper, herz: ansichtHerz, schlaf: ansichtSchlaf, sport: ansichtSport, hinweise: ansichtHinweise, auswertung: ansichtAuswertung,
   tag: ansichtTag, werte: ansichtWerte, status: ansichtStatus, aktivitaet: ansichtAktivitaet, ekg: ansichtEkg, bericht: ansichtBericht };
 let MAIN, KOPF_AKTION, KOPF_TITEL, KOPF_ZURUECK, KOPF, STAND, DIALOG, SYNC_KNOPF, SYNC_MELDUNG;
 let LAUF = 0;
