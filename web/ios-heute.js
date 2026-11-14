@@ -78,6 +78,8 @@ body.ios-skin .stand {
 @media (max-width: 640px) {
   body.ios-skin .kopf { flex-wrap: wrap; row-gap: 8px; }
   body.ios-skin .kopf .kopf-titel { flex: 0 1 auto; }
+  body.ios-skin .kopf .ios-profil { order: 1; margin-left: auto; }
+  body.ios-skin .kopf::after { content: ""; order: 2; flex: 0 0 100%; height: 0; }
   body.ios-skin .kopf .stand { order: 10; }
   body.ios-skin .kopf .sync-knopf { order: 11; }
   body.ios-skin .kopf .menue-knopf { order: 12; }
