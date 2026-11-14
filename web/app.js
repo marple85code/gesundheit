@@ -4672,7 +4672,7 @@ function eDialog(optionen) {
     if (vorgabe) suchen(vorgabe); else starten();
   }
 
-  const GEM_MODELLE = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-flash"];
+  const GEM_MODELLE = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"];
   async function geminiFragen(key, bild64) {
     const eigen = (speicher.get("gawi.gemini.modell") || "").trim();
     const modelle = eigen ? [eigen, ...GEM_MODELLE] : GEM_MODELLE;
