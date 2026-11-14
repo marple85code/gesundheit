@@ -3,15 +3,28 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.0.1";
+const APP_VERSION = "2.0.2";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const speicher = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
-  set(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* ohne Speicher */ } },
+  set(k, v) {
+    try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* ohne Speicher */ }
+    if (!speicher.fremd && einstSync(k)) { // Einstellung geändert: Zeitpunkt merken und auf andere Geräte übertragen
+      try { const z = JSON.parse(localStorage.getItem(EINST_Z) || "{}"); z[k] = Date.now(); localStorage.setItem(EINST_Z, JSON.stringify(z)); } catch { /* ohne Speicher */ }
+      if (typeof window.gawiEinstGeaendert === "function") window.gawiEinstGeaendert();
+    }
+  },
+  fremd: false,
 };
+/** Einstellungen und Eingaben, die auf alle Geräte übertragen werden (nie Schlüssel oder Zugangsdaten) */
+const EINST_Z = "gesundheit.einst.zeiten";
+function einstSync(k) {
+  return typeof k === "string" && (k.startsWith("gesundheit.auswertung.") || k.startsWith("gesundheit.klapp.") || k === "gesundheit.zeitraum" || k === "gesundheit.darstellung"
+    || k === "gesundheit.region" || k === "gesundheit.karte" || k === "gesundheit.sport.doppelt");
+}
 
 // Fehler der App auf diesem Gerät merken – für das Fehlerprotokoll (ohne Schlüssel und Zugangsdaten)
 const FEHLER_S = "gesundheit.fehler";
@@ -4249,6 +4262,7 @@ const E_GERICHTE = "gesundheit.ernaehrung.gerichte", E_GERICHTZ = "gesundheit.er
 const E_ZEIT = "gesundheit.ernaehrung.zeit", E_STAMMZ = "gesundheit.ernaehrung.stammzeit", E_OFFEN = "gesundheit.ernaehrung.offen";
 const E_ABG = { laeuft: false, nochmal: false, timer: null, runden: 0, text: "", gesendet: {}, aktualisieren: null };
 function eStatus(text) { E_ABG.text = text; if (E_ABG.aktualisieren) E_ABG.aktualisieren(); }
+window.gawiEinstGeaendert = () => { E_ABG.runden = 0; eAbgleichPlanen(3000); };
 function eAbgleichPlanen(ms = 4000) { clearTimeout(E_ABG.timer); E_ABG.timer = setTimeout(() => eAbgleichen().catch(() => {}), ms); }
 function eStammGeaendert() {
   speicher.set(E_STAMMZ, String(Date.now()));
@@ -4272,6 +4286,29 @@ async function ePush(z, pfad, objekt, leise) {
   await Sync.rufe(z, "POST", `/repos/${z.repo}/actions/workflows/ernaehrung.yml/dispatches`, { ref: z.zweig || "main", inputs: { datei: name, inhalt: b64 } });
   E_ABG.gesendet[pfad] = { json, zeit: Date.now() };
   return true;
+}
+/** Einstellungen (Ziele, Ausrüstung, Zeiträume, Darstellung, Ansichten): pro Eintrag gewinnt die neuere Änderung. */
+async function einstAbgleichen(z) {
+  const pfad = "d/ernaehrung/einst.enc";
+  const c = await eCloudLesen(pfad);
+  if (c.fehler) return { fehler: true };
+  const cloud = (c.daten && c.daten.w) || {};
+  let zeiten = {}; try { zeiten = JSON.parse(localStorage.getItem(EINST_Z) || "{}") || {}; } catch { zeiten = {}; }
+  const schluessel = new Set([...Object.keys(cloud), ...Object.keys(zeiten)]);
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (einstSync(k)) schluessel.add(k); } } catch { /* leer */ }
+  const merged = { ...cloud };
+  let neu = false, hoch = false;
+  for (const k of schluessel) {
+    if (!einstSync(k)) continue;
+    const lv = speicher.get(k), lt = zeiten[k] || (lv != null ? 1 : 0), ct = cloud[k] ? cloud[k][1] || 0 : 0;
+    if (ct > lt) {
+      speicher.fremd = true; try { speicher.set(k, cloud[k][0]); } finally { speicher.fremd = false; }
+      zeiten[k] = ct; neu = true;
+    } else if (lt > ct) { merged[k] = [lv, lt]; zeiten[k] = lt; hoch = true; }
+  }
+  try { localStorage.setItem(EINST_Z, JSON.stringify(zeiten)); } catch { /* ohne Speicher */ }
+  if (hoch) { try { await ePush(z, pfad, { w: merged }); } catch { return { fehler: true }; } }
+  return { neu, hoch };
 }
 /** Ein Monat: neuere Tage aus der Cloud übernehmen, neuere lokale Tage hochladen. */
 async function eMonatAbgleichen(z, m) {
@@ -4347,7 +4384,7 @@ async function eGerichteAbgleichen(z) {
 async function eAbgleichen() {
   if (E_ABG.laeuft) { E_ABG.nochmal = true; return; }
   E_ABG.laeuft = true;
-  let neu = false, stammNeu = false, sportNeu = false;
+  let neu = false, stammNeu = false, sportNeu = false, einstNeu = false;
   try {
     const z = await Sync.zugang();
     if (!z) { eStatus("Nur auf diesem Gerät gespeichert (kein Sync-Token eingerichtet)."); return; }
@@ -4368,6 +4405,8 @@ async function eAbgleichen() {
     if (ge.fehler) fehler = true; else { if (ge.neu) neu = true; if (ge.hoch) hoch = true; }
     const sp = await sportAbgleichen(z);
     if (sp.fehler) fehler = true; else { if (sp.neu) { neu = true; sportNeu = true; } if (sp.hoch) hoch = true; }
+    const ei = await einstAbgleichen(z);
+    if (ei.fehler) fehler = true; else { if (ei.neu) einstNeu = true; if (ei.hoch) hoch = true; }
     speicher.set(E_OFFEN, JSON.stringify([...offen]));
     if (fehler) eStatus("Abgleich nicht möglich. Bist du online? Die Daten bleiben auf diesem Gerät.");
     else if (hoch || offen.size) {
@@ -4380,7 +4419,11 @@ async function eAbgleichen() {
     E_ABG.laeuft = false;
     if (E_ABG.nochmal) { E_ABG.nochmal = false; eAbgleichPlanen(2000); }
   }
-  if (sportNeu && /^#(sport|heute)?$/.test(location.hash)) neuZeichnen();
+  if (einstNeu) {
+    const t = speicher.get(S.darstellung);
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
+    if (!document.querySelector("dialog[open]")) neuZeichnen();
+  } else if (sportNeu && /^#(sport|heute)?$/.test(location.hash)) neuZeichnen();
   if (neu || stammNeu) document.dispatchEvent(new CustomEvent("gawi:ernaehrung", { detail: { stamm: stammNeu } }));
 }
 document.addEventListener("gawi:ernaehrung", (ev) => {
@@ -5036,7 +5079,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.0.1): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.0.2): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
