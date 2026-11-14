@@ -181,6 +181,14 @@ body.ios-skin .verlauf-kopf h3 {
 }
 body.ios-skin .kachel > .achtung { display: none !important; }
 body.ios-skin .kachel-befund { display: none !important; }
+body.ios-skin .kachel-einstufung { font-size: 12.5px; font-weight: 650; color: #1b873f; }
+body.ios-skin .kachel-einstufung.stufe-hinweis { color: #946800; }
+body.ios-skin .kachel-einstufung.stufe-ernst { color: #c25100; }
+body.ios-skin .kachel-einstufung.stufe-kritisch { color: #c81e32; }
+:root[data-theme="dark"] body.ios-skin .kachel-einstufung, :root[data-theme="dark"] .kachel-einstufung { color: #4cd964; }
+:root[data-theme="dark"] .kachel-einstufung.stufe-hinweis { color: #ffd60a; }
+:root[data-theme="dark"] .kachel-einstufung.stufe-ernst { color: #ff9f0a; }
+:root[data-theme="dark"] .kachel-einstufung.stufe-kritisch { color: #ff6961; }
 
 body.ios-skin .kachel, body.ios-skin a.kachel {
   border: 0 !important;

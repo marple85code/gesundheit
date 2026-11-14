@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2.14";
+const APP_VERSION = "1.2.15";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1727,15 +1727,22 @@ async function ansichtHeute() {
       unter: !alle7 ? "keine Messung in 7 Tagen" : bf.blutdruck_einzel || bf.blutdruck ? "" : chip(alle7[0] >= 135 || alle7[1] >= 85 ? "über 135/85" : "unter 135/85", alle7[0] >= 135 || alle7[1] >= 85 ? "ernst" : "gut"),
     }));
   }
+  const pers = personAus(await Daten.info("garmin"), w), zon = koerperZonen(pers);
+  // Einstufung als Klartext unter dem Wert, zum Beispiel „BMI 29,4 · Übergewicht“; Farbe wie die Stufe der Kachel
+  const einstufung = (text, befund) => (text ? h("span", { class: `kachel-einstufung stufe-${befund ? befund.stufe || "hinweis" : "gut"}` }, text) : null);
+  const wortVon = (z, v) => (z ? (z.wort && z.wort(v)) || z.stufen[zoneIndex(z, v)][0] : null);
+  const bmiWert = gLetzt && pers.groesse ? Math.round(gLetzt[1] / (pers.groesse * pers.groesse) * 10) / 10 : null;
   if (gLetzt) {
     const t = wTaeglich(gew).filter((p) => p[0] >= isoMinus(90));
     kacheln.push(kachel({ titel: "Gewicht", wert: zahl(gLetzt[1], 1), einheit: "kg", link: "#koerper", funkeDaten: t, befund: bf.bmi,
+      extra: bmiWert != null ? einstufung(`BMI ${zahl(bmiWert, 1)} · ${wortVon(zon.bmi, bmiWert)}`, bf.bmi) : null,
       unter: deltaText(gLetzt[1], vorTagen(gew, 30, gLetzt[0]), 1, "kg", "in 30 Tagen") }));
   }
   const fett6 = wReihe(w, 6);
   if (fett6.length) {
     const l = letzter(fett6);
     kacheln.push(kachel({ titel: "Körperfett", wert: zahl(l[1], 1), einheit: "%", link: "#koerper", funkeDaten: wTaeglich(fett6).filter((p) => p[0] >= isoMinus(90)), befund: bf.fett,
+      extra: zon && zon.fett ? einstufung(wortVon(zon.fett, Math.round(l[1] * 10) / 10), bf.fett) : null,
       unter: deltaText(l[1], vorTagen(fett6, 30, l[0]), 1, "Punkte", "in 30 Tagen") }));
   }
   const sd = letzter(k.schlaf_dauer);
