@@ -72,19 +72,20 @@ body.ios-skin .stand {
 }
 
 .ios-profil { position: relative; margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
-.ios-name { font-weight: 600; font-size: 14px; color: var(--tinte); white-space: nowrap; }
+.ios-name { display: none !important; font-weight: 600; font-size: 14px; color: var(--tinte); white-space: nowrap; }
 /* Handy: Titel bekommt Platz in der ersten Zeile (nicht abgeschnitten), Status und Knöpfe rücken
    darunter; der Name bleibt neben dem Avatar sichtbar und wird nur bei Platzmangel gekürzt. */
 @media (max-width: 640px) {
-  body.ios-skin .kopf { flex-wrap: wrap; row-gap: 8px; }
-  body.ios-skin .kopf .kopf-titel { flex: 0 1 auto; }
-  body.ios-skin .kopf .ios-profil { order: 1; margin-left: auto; }
-  body.ios-skin .kopf::after { content: ""; order: 2; flex: 0 0 100%; height: 0; }
-  body.ios-skin .kopf .stand { order: 10; }
-  body.ios-skin .kopf .sync-knopf { order: 11; }
-  body.ios-skin .kopf .menue-knopf { order: 12; }
-  body.ios-skin .kopf.startseite h1 { font-size: clamp(26px, 8vw, 32px); }
-  .ios-name { display: inline; font-size: 13px; max-width: 38vw; overflow: hidden; text-overflow: ellipsis; }
+  /* Zeile 1: Status, Sync, Menü rechts oben in der Ecke. Zeile 2: Begrüßung links, Profilbild rechts. */
+  body.ios-skin .kopf { flex-wrap: wrap; row-gap: 10px; align-items: center; }
+  body.ios-skin .kopf .kopf-zurueck { order: 0; }
+  body.ios-skin .kopf .stand { order: 1; margin-left: auto; }
+  body.ios-skin .kopf .sync-knopf { order: 2; }
+  body.ios-skin .kopf .menue-knopf { order: 3; }
+  body.ios-skin .kopf::after { content: ""; order: 4; flex: 0 0 100%; height: 0; }
+  body.ios-skin .kopf .kopf-titel { order: 5; flex: 1 1 0; min-width: 0; }
+  body.ios-skin .kopf .ios-profil { order: 6; margin-left: auto; }
+  body.ios-skin .kopf.startseite h1 { font-size: clamp(24px, 7.2vw, 32px); line-height: 1.15; }
 }
 .ios-avatar {
   width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
@@ -596,6 +597,7 @@ body.ios-heute .kacheln {
     if (bild) av.innerHTML = '<img alt="Profilbild" src="' + bild + '">';
     else av.textContent = initialen(nameLaden());
     wrap.querySelector(".ios-name").textContent = nameLaden();
+    begruessung();
   }
   function menueSchliessen() {
     var m = document.querySelector(".ios-menue");
@@ -688,12 +690,24 @@ body.ios-heute .kacheln {
        sp && sp.classList.contains("warnung") ? " warnung" : "");
   }
 
+  /* ---- Begrüßung statt „Heute“ auf der Startseite ---- */
+  function begruessung() {
+    var kopf = document.querySelector(".kopf");
+    var h1 = kopf && kopf.querySelector(".kopf-titel");
+    if (!h1 || !kopf.classList.contains("startseite")) return;
+    var h = new Date().getHours(), n = nameLaden().trim();
+    var gruss = h >= 5 && h < 11 ? "Guten Morgen" : h >= 11 && h < 17 ? "Hallo" : h >= 17 && h < 23 ? "Guten Abend" : "Gute Nacht";
+    var text = n ? gruss + ", " + n : gruss;
+    if (h1.textContent !== text) h1.textContent = text;
+  }
+
   /* ---- Hauptlogik ---- */
   function anwenden() {
     cssInjizieren();
     document.body.classList.add("ios-skin");
     profilAnlegen();
     profilAktualisieren();
+    begruessung();
     ersetzeChips();
     ersetzeMarker();
     iconsSetzen();
@@ -713,6 +727,7 @@ body.ios-heute .kacheln {
     cssInjizieren();
     new MutationObserver(planen).observe(document.body, { childList: true, subtree: true });
     window.addEventListener("hashchange", planen);
+    setInterval(begruessung, 60000);
     planen();
   }
   if (document.body) start();
