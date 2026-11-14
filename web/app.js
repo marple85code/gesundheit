@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -3768,6 +3768,506 @@ const Aktualisierung = {
 // ======================================================================
 // Gerüst, Navigation, Router
 // ======================================================================
+// ======================================================================
+// Ernährung (Rechner) und Tagesringe
+// ======================================================================
+/* =========================================================
+   Ernährung: Kalorien- und Makro-Rechner und Tagesringe (ab Version 1.4.0)
+   Wird vor app.js geladen; nutzt die Bausteine von app.js erst beim Aufruf.
+   ========================================================= */
+
+const E_PROFIL = "gesundheit.ernaehrung.profil";
+const E_PAL = [
+  [1.2, "Kaum aktiv (überwiegend liegend oder sitzend)"],
+  [1.4, "Überwiegend sitzend, wenig Bewegung in der Freizeit"],
+  [1.6, "Sitzend und gehend oder stehend, etwas Sport"],
+  [1.8, "Überwiegend gehend oder stehend, regelmäßig Sport"],
+  [2.0, "Körperlich anstrengend oder täglich intensives Training"],
+];
+const E_ZIELE = [["abnehmen", "Abnehmen"], ["halten", "Gewicht halten"], ["zunehmen", "Zunehmen oder Muskeln aufbauen"]];
+const E_TEMPO = [[0.10, "Sanft (10 % weniger)"], [0.15, "Moderat (15 % weniger)"], [0.20, "Zügig (20 % weniger)"]];
+const E_FARBE = { protein: "#ff3b30", kh: "#0a84ff", fett: "#ff9f0a" };
+
+function eProfilLesen() {
+  try { return JSON.parse(speicher.get(E_PROFIL) || "{}") || {}; } catch { return {}; }
+}
+function eProfilSchreiben(p) { speicher.set(E_PROFIL, JSON.stringify(p)); }
+
+/** Reine Rechnung. p: gewicht (kg), groesse (cm), alter, geschlecht ("m"/"w"), pal, ziel, tempo, formel, fettfrei (kg, optional) */
+function eBerechnen(p) {
+  const r = { fehler: [], hinweise: [] };
+  if (!(p.gewicht > 30 && p.groesse > 120 && p.alter > 0 && (p.geschlecht === "m" || p.geschlecht === "w"))) { r.fehler.push("Bitte Größe, Alter und Geschlecht angeben."); return r; }
+  if (p.alter < 18) r.hinweise.push("Die Formeln gelten für Erwachsene. Für Kinder und Jugendliche bitte Kinderärztin oder Kinderarzt fragen.");
+  const mifflin = 10 * p.gewicht + 6.25 * p.groesse - 5 * p.alter + (p.geschlecht === "m" ? 5 : -161);
+  const katch = p.fettfrei > 20 ? 370 + 21.6 * p.fettfrei : null;
+  r.formel = p.formel === "katch" && katch ? "katch" : "mifflin";
+  r.grund = Math.round(r.formel === "katch" ? katch : mifflin);
+  r.pal = p.pal || 1.4;
+  r.gesamt = Math.round(r.grund * r.pal);
+  const bmi = p.gewicht / ((p.groesse / 100) ** 2);
+  r.bmi = bmi;
+  let ziel = p.ziel || "halten";
+  if (ziel === "abnehmen" && bmi < 18.5) { ziel = "halten"; r.hinweise.push("Bei einem BMI unter 18,5 ist Abnehmen nicht sinnvoll. Der Rechner zeigt deshalb das Halten an."); }
+  r.ziel = ziel;
+  let kcal = r.gesamt;
+  if (ziel === "abnehmen") kcal = r.gesamt * (1 - (p.tempo || 0.15));
+  if (ziel === "zunehmen") kcal = r.gesamt * 1.10;
+  // Untergrenze: nie unter den Grundumsatz und nie unter 1200 (Frauen) beziehungsweise 1500 (Männer) kcal
+  const untergrenze = Math.max(r.grund, p.geschlecht === "m" ? 1500 : 1200);
+  if (ziel === "abnehmen" && kcal < untergrenze) { kcal = untergrenze; r.hinweise.push(`Das Defizit wurde begrenzt: Unter ${zahl(untergrenze)} kcal pro Tag sollte man ohne ärztliche Begleitung nicht essen.`); }
+  r.kcal = Math.round(kcal / 10) * 10;
+  r.differenz = r.kcal - r.gesamt;
+  // Eiweiß je kg: DGE-Referenz, bei Abnehmen und Muskelaufbau nach ISSN-Empfehlung; bei BMI über 30 gilt das Gewicht bei BMI 30
+  const ref = Math.min(p.gewicht, 30 * (p.groesse / 100) ** 2);
+  r.refGewicht = Math.round(ref * 10) / 10;
+  const dge = p.alter >= 65 ? 1.0 : 0.8;
+  const proKg = ziel === "abnehmen" ? 1.4 : ziel === "zunehmen" ? 1.6 : (r.pal >= 1.8 ? 1.2 : dge);
+  r.proteinProKg = proKg;
+  r.protein = Math.round(proKg * ref);
+  r.fett = Math.round((r.kcal * 0.30) / 9);
+  r.kh = Math.max(0, Math.round((r.kcal - r.protein * 4 - r.fett * 9) / 4));
+  r.ballast = 30;
+  r.anteile = { protein: r.protein * 4 / r.kcal, fett: r.fett * 9 / r.kcal, kh: r.kh * 4 / r.kcal };
+  if (ziel === "abnehmen") r.proWoche = Math.round(((r.gesamt - r.kcal) * 7 / 7700) * 100) / 100;
+  return r;
+}
+
+/** Konzentrische Ringe. liste: [{ anteil 0..1, farbe }] von außen nach innen */
+function eRinge(liste, groesse = 132, dicke = 13) {
+  const mitte = groesse / 2;
+  const svg = s("svg", { viewBox: `0 0 ${groesse} ${groesse}`, width: groesse, height: groesse, role: "img", class: "ringe" });
+  liste.forEach((x, i) => {
+    const r = mitte - dicke / 2 - 1 - i * (dicke + 3);
+    if (r <= 4) return;
+    const u = 2 * Math.PI * r;
+    svg.append(s("circle", { cx: mitte, cy: mitte, r, fill: "none", stroke: x.farbe, "stroke-opacity": 0.2, "stroke-width": dicke }));
+    const a = Math.max(0, Math.min(1, x.anteil || 0));
+    if (a > 0) svg.append(s("circle", { cx: mitte, cy: mitte, r, fill: "none", stroke: x.farbe, "stroke-width": dicke, "stroke-linecap": "round",
+      "stroke-dasharray": `${Math.max(0.01, a * u)} ${u}`, transform: `rotate(-90 ${mitte} ${mitte})` }));
+  });
+  return svg;
+}
+
+/** Kachel „Tagesaktivität“ für die Startseite: Schritte, Etagen, Aktive Minuten als Ringe */
+function eTagesringe(k, heute) {
+  const schritte = amTag(k.schritte, heute);
+  const etagen = amTag(k.etagen, heute);
+  const mod = amTag(k.im_mod, heute), int = amTag(k.im_int, heute);
+  const minuten = mod != null || int != null ? (mod || 0) + 2 * (int || 0) : null; // Garmin zählt intensive Minuten doppelt
+  const kcal = amTag(k.aktivkcal, heute);
+  const strecke = amTag(k.strecke, heute);
+  if (schritte == null && etagen == null && minuten == null && kcal == null) return null;
+  const schrittZiel = amTag(k.schrittziel, heute) || (letzter(k.schrittziel) || [])[1] || 10000;
+  const etagenZiel = 10, minutenZiel = 22; // Garmin-Standard; 150 Minuten pro Woche (WHO) entsprechen etwa 22 pro Tag
+  const zeilen = [
+    ["Schritte", schritte, schrittZiel, "var(--ring-rot, #ff3b30)", ""],
+    ["Etagen", etagen, etagenZiel, "var(--ring-gruen, #34c759)", ""],
+    ["Aktive Minuten", minuten, minutenZiel, "var(--ring-blau, #0a84ff)", " Min."],
+  ];
+  const farben = ["#ff3b30", "#34c759", "#0a84ff"];
+  const legende = h("ul", { class: "ring-legende" }, zeilen.map(([name, wert, ziel, , einheit], i) =>
+    h("li", null, h("i", { style: { background: farben[i] } }), h("span", { class: "rl-name" }, name),
+      h("b", null, wert != null ? `${zahl(Math.round(wert))}${einheit}` : "–"), h("small", null, ` / ${zahl(ziel)}`))));
+  const extra = [];
+  if (kcal != null) extra.push(h("div", null, h("small", null, "Aktive Kalorien"), h("b", null, `${zahl(Math.round(kcal))} kcal`)));
+  if (strecke != null) extra.push(h("div", null, h("small", null, "Strecke"), h("b", null, `${zahl(strecke, 1)} km`)));
+  const ringe = eRinge(zeilen.map(([, wert, ziel], i) => ({ anteil: wert != null ? wert / ziel : 0, farbe: farben[i] })));
+  ringe.setAttribute("aria-label", zeilen.map(([n, w, z]) => `${n} ${w != null ? zahl(Math.round(w)) : "keine Angabe"} von ${zahl(z)}`).join(", "));
+  return h("a", { class: "kachel tagesringe", href: "#sport" },
+    h("span", { class: "kachel-titel" }, "Tagesaktivität"),
+    h("div", { class: "ring-zeile" }, ringe, h("div", { class: "ring-text" }, legende, extra.length ? h("div", { class: "ring-extra" }, extra) : null)));
+}
+
+/** Zielwerte als Ring mit Kalorien in der Mitte; Farbbögen nach Energieanteil */
+function eZielRing(r) {
+  const groesse = 168, dicke = 20, mitte = groesse / 2, rad = mitte - dicke / 2 - 2, u = 2 * Math.PI * rad;
+  const svg = s("svg", { viewBox: `0 0 ${groesse} ${groesse}`, width: groesse, height: groesse, role: "img", class: "ziel-ring",
+    "aria-label": `Tagesziel ${r.kcal} kcal: Eiweiß ${r.protein} g, Kohlenhydrate ${r.kh} g, Fett ${r.fett} g` });
+  svg.append(s("circle", { cx: mitte, cy: mitte, r: rad, fill: "none", stroke: "currentColor", "stroke-opacity": 0.1, "stroke-width": dicke }));
+  let start = 0;
+  for (const [id, a] of [["protein", r.anteile.protein], ["kh", r.anteile.kh], ["fett", r.anteile.fett]]) {
+    const len = a * u;
+    if (len > 1) svg.append(s("circle", { cx: mitte, cy: mitte, r: rad, fill: "none", stroke: E_FARBE[id], "stroke-width": dicke,
+      "stroke-dasharray": `${Math.max(0.01, len - 3)} ${u}`, "stroke-dashoffset": -start, transform: `rotate(-90 ${mitte} ${mitte})` }));
+    start += len;
+  }
+  const t1 = s("text", { x: mitte, y: mitte - 2, "text-anchor": "middle", "font-size": 30, "font-weight": 700, fill: "currentColor" }, zahl(r.kcal));
+  const t2 = s("text", { x: mitte, y: mitte + 20, "text-anchor": "middle", "font-size": 13, fill: "currentColor", "fill-opacity": 0.6 }, "kcal pro Tag");
+  svg.append(t1, t2);
+  return svg;
+}
+
+async function eRechnerBauen(zielMelden) {
+  const [w, info] = await Promise.all([Daten.withings(), Daten.info("garmin")]);
+  const pers = personAus(info, w);
+  const gew = letzter(wReihe(w, 1));
+  const fettfrei = letzter(wReihe(w, 5));
+  let reihe7 = [];
+  try { reihe7 = await Daten.reihe("g.tag.totalKilocalories", isoMinus(8), isoMinus(1)); } catch { reihe7 = []; }
+  const gespeichert = eProfilLesen();
+  const p = {
+    groesse: gespeichert.groesse || (pers.groesse ? Math.round(pers.groesse * 100) : ""),
+    alter: gespeichert.alter || pers.alter || "",
+    geschlecht: gespeichert.geschlecht || pers.geschlecht || "",
+    pal: gespeichert.pal || 1.4, ziel: gespeichert.ziel || "halten", tempo: gespeichert.tempo || 0.15, formel: gespeichert.formel || "mifflin",
+  };
+  const ergebnis = h("div", { class: "ernaehrung-ergebnis" });
+  const feld = (name, steuerung) => h("label", { class: "e-feld" }, h("span", null, name), steuerung);
+  const zahlFeld = (id, min, max, einheit) => {
+    const i = h("input", { type: "number", inputmode: "numeric", min, max, value: p[id] === "" ? null : p[id], "aria-label": id });
+    i.addEventListener("input", () => { p[id] = i.value === "" ? "" : Number(i.value); aenderung(); });
+    return h("div", { class: "e-zahl" }, i, h("small", null, einheit));
+  };
+  const auswahl = (id, optionen, numerisch = false) => {
+    const sel = h("select", null, optionen.map(([wert, text]) => h("option", { value: wert, selected: String(p[id]) === String(wert) ? true : null }, text)));
+    sel.addEventListener("change", () => { p[id] = numerisch ? Number(sel.value) : sel.value; aenderung(); });
+    return sel;
+  };
+  const tempoFeld = feld("Tempo", auswahl("tempo", E_TEMPO, true));
+  const formelFeld = fettfrei ? feld("Formel für den Grundumsatz", auswahl("formel", [["mifflin", "Mifflin-St Jeor (Standard)"], ["katch", "Katch-McArdle (mit fettfreier Masse der Waage)"]])) : null;
+
+  function aenderung() {
+    eProfilSchreiben({ groesse: p.groesse, alter: p.alter, geschlecht: p.geschlecht, pal: p.pal, ziel: p.ziel, tempo: p.tempo, formel: p.formel });
+    zeichnen();
+  }
+  function zeichnen() {
+    tempoFeld.hidden = p.ziel !== "abnehmen";
+    const r = eBerechnen({ gewicht: gew ? gew[1] : 0, groesse: Number(p.groesse), alter: Number(p.alter), geschlecht: p.geschlecht, pal: p.pal, ziel: p.ziel, tempo: p.tempo,
+      formel: p.formel, fettfrei: fettfrei ? fettfrei[1] : null });
+    zielMelden(r.fehler.length ? null : r);
+    if (r.fehler.length) { ergebnis.replaceChildren(hinweis(r.fehler)); return; }
+    const makro = (id, name, g, proKg) => h("div", { class: "e-makro" },
+      h("div", { class: "e-makro-kopf" }, h("i", { style: { background: E_FARBE[id] } }), h("span", null, name), h("b", null, `${zahl(g)} g`)),
+      h("div", { class: "e-balken" }, h("i", { style: { width: `${Math.min(100, Math.round(r.anteile[id] * 100))}%`, background: E_FARBE[id] } })),
+      h("small", null, `${zahl(Math.round(r.anteile[id] * 100))} % der Energie${proKg ? `, ${zahl(proKg, 1)} g pro kg` : ""}`));
+    const vergleich = reihe7.length >= 3 ? Math.round(reihe7.reduce((a, x) => a + x[1], 0) / reihe7.length) : null;
+    ergebnis.replaceChildren(...[
+      h("section", { class: "abschnitt e-ziel" },
+        h("div", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, "Dein Tagesziel"), h("p", null, `${E_ZIELE.find((z) => z[0] === r.ziel)[1]}${r.ziel === "halten" ? "" : r.differenz < 0 ? `, ${zahl(-r.differenz)} kcal weniger als dein Verbrauch` : `, ${zahl(r.differenz)} kcal mehr als dein Verbrauch`}`))),
+        h("div", { class: "e-ziel-zeile" }, eZielRing(r), h("div", { class: "e-makros" },
+          makro("protein", "Eiweiß", r.protein, r.proteinProKg), makro("kh", "Kohlenhydrate", r.kh), makro("fett", "Fett", r.fett))),
+        h("p", { class: "e-klein" }, `Ballaststoffe: mindestens ${r.ballast} g pro Tag.`)),
+      r.hinweise.length ? hinweis(r.hinweise, "warnung", "achtung") : null,
+      h("section", { class: "abschnitt" },
+        h("div", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, "So wurde gerechnet"))),
+        h("ul", { class: "werte e-werte" },
+          h("li", null, h("span", { class: "name" }, `Grundumsatz (${r.formel === "katch" ? "Katch-McArdle" : "Mifflin-St Jeor"})`), h("span", { class: "zahl" }, zahl(r.grund), h("small", null, "kcal"))),
+          h("li", null, h("span", { class: "name" }, `Gesamtumsatz (Grundumsatz × ${zahl(r.pal, 1)})`), h("span", { class: "zahl" }, zahl(r.gesamt), h("small", null, "kcal"))),
+          vergleich ? h("li", null, h("span", { class: "name" }, "Zum Vergleich: Garmin gemessen, Mittel der letzten Tage"), h("span", { class: "zahl" }, zahl(vergleich), h("small", null, "kcal"))) : null,
+          r.proWoche ? h("li", null, h("span", { class: "name" }, "Erwartete Abnahme pro Woche"), h("span", { class: "zahl" }, `etwa ${zahl(r.proWoche, 1)}`, h("small", null, "kg"))) : null,
+          h("li", null, h("span", { class: "name" }, `Eiweiß: ${zahl(r.proteinProKg, 1)} g pro kg (Bezugsgewicht ${zahl(r.refGewicht, 1)} kg)`), h("span", { class: "zahl" }, zahl(r.protein), h("small", null, "g"))),
+          h("li", null, h("span", { class: "name" }, "Fett: 30 % der Energie"), h("span", { class: "zahl" }, zahl(r.fett), h("small", null, "g"))),
+          h("li", null, h("span", { class: "name" }, "Kohlenhydrate: der Rest"), h("span", { class: "zahl" }, zahl(r.kh), h("small", null, "g")))),
+        h("p", { class: "e-klein" }, "Quellen: Grundumsatz nach ",
+          h("a", { href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC6413219/", target: "_blank", rel: "noopener" }, "Mifflin-St Jeor und Vergleichsstudien"),
+          ", Aktivitätsfaktoren nach ", h("a", { href: "https://www.dge.de/wissenschaft/referenzwerte/energie/", target: "_blank", rel: "noopener" }, "DGE-Referenzwerten"),
+          ", Eiweiß nach ", h("a", { href: "https://www.dge.de/wissenschaft/dge-leitlinien/leitlinie-protein/", target: "_blank", rel: "noopener" }, "DGE-Leitlinie"),
+          " und ", h("a", { href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC13665703/", target: "_blank", rel: "noopener" }, "ISSN-Positionspapier"),
+          ". Die Werte sind eine Orientierung und keine ärztliche Beratung. Bei Krankheit, Schwangerschaft oder Essstörung bitte mit Ärztin, Arzt oder Ernährungsberatung sprechen."))]
+      .filter(Boolean));
+  }
+
+  const knoten = [
+    h("section", { class: "abschnitt" },
+      h("div", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, "Deine Angaben"), h("p", null, "Das Gewicht kommt automatisch von deiner Waage."))),
+      h("div", { class: "e-formular" },
+        feld("Gewicht", h("div", { class: "e-zahl e-fest" }, h("b", null, gew ? zahl(gew[1], 1) : "–"), h("small", null, "kg, von der Waage"))),
+        feld("Größe", zahlFeld("groesse", 120, 230, "cm")),
+        feld("Alter", zahlFeld("alter", 14, 110, "Jahre")),
+        feld("Geschlecht", auswahl("geschlecht", [["", "Bitte wählen"], ["w", "weiblich"], ["m", "männlich"]])),
+        feld("Bewegung im Alltag", auswahl("pal", E_PAL, true)),
+        feld("Ziel", auswahl("ziel", E_ZIELE)), tempoFeld, formelFeld)),
+    ergebnis,
+  ];
+  zeichnen();
+  return knoten;
+}
+
+// ---- Tagebuch: Einträge je Tag, eigene Lebensmittel, Suche (BLS offline, Open Food Facts online)
+const E_TAGE = "gesundheit.ernaehrung.tage", E_EIGENE = "gesundheit.ernaehrung.eigene";
+const E_MAHL = [["f", "Frühstück"], ["m", "Mittagessen"], ["a", "Abendessen"], ["s", "Snacks"]];
+const E_STAND = { tag: null, ziel: null };
+function eLesen(k, leer) { try { return JSON.parse(speicher.get(k) || "null") || leer; } catch { return leer; } }
+function eTagEintraege(iso) { return eLesen(E_TAGE, {})[iso] || []; }
+function eTagSchreiben(iso, liste) {
+  const t = eLesen(E_TAGE, {});
+  if (liste.length) t[iso] = liste; else delete t[iso];
+  speicher.set(E_TAGE, JSON.stringify(t));
+}
+const eRund = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d;
+const eNeueId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+/** Werte eines Eintrags: l = [kcal, Eiweiß, Fett, Kohlenhydrate, Ballaststoffe, Zucker] je 100 g */
+function eWerte(e) { return e.l.map((v) => (v || 0) * e.g / 100); }
+function eSumme(liste) {
+  const s = [0, 0, 0, 0, 0, 0];
+  for (const e of liste) eWerte(e).forEach((v, i) => { s[i] += v; });
+  return { kcal: s[0], p: s[1], f: s[2], c: s[3], fb: s[4], zu: s[5] };
+}
+const eNorm = (t) => String(t || "").toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+// BLS 4.0 (Max Rubner-Institut, CC BY 4.0): 7.140 Lebensmittel, wird beim ersten Suchen geladen
+let E_BLS = null;
+async function eBlsLaden() {
+  if (E_BLS) return E_BLS;
+  const r = await fetch("vendor/bls.json");
+  if (!r.ok) throw new Error("BLS nicht verfügbar");
+  const liste = await r.json();
+  E_BLS = liste.map((x) => ({ name: x[1], l: [x[2], x[3] || 0, x[4] || 0, x[5] || 0, x[6] || 0, x[7] || 0], quelle: "BLS", marke: "", n: eNorm(x[1]) }));
+  return E_BLS;
+}
+function eSuchen(liste, text, max = 40) {
+  const t = eNorm(text).split(/\s+/).filter(Boolean);
+  if (!t.length) return [];
+  const treffer = [];
+  for (const x of liste) {
+    const n = x.n || (x.n = eNorm(`${x.name} ${x.marke || ""}`));
+    const nz = x.nz || (x.nz = n.replace(/[\s,\/()-]+/g, ""));
+    const woerter = n.split(/[\s,\/()-]+/);
+    if (!t.every((w) => (w.length < 3 ? woerter.some((x) => x.startsWith(w)) : n.includes(w) || nz.includes(w)))) continue;
+    let punkte = 0;
+    if (nz.startsWith(t[0])) punkte += 3;
+    if (nz === t.join("")) punkte += 4;
+    for (const w of t) { if (woerter.includes(w)) punkte += 2; else if (n.includes(" " + w) || n.startsWith(w)) punkte += 1; }
+    if (t.length === 1 && nz.startsWith(t[0]) && nz.length <= t[0].length + 6) punkte += 2;
+    treffer.push([punkte - n.length / 200, x]);
+  }
+  return treffer.sort((a, b) => b[0] - a[0]).slice(0, max).map((x) => x[1]);
+}
+function eOffLebensmittel(p) {
+  const n = p.nutriments || {};
+  let kcal = n["energy-kcal_100g"];
+  if (kcal == null && n["energy-kj_100g"] != null) kcal = n["energy-kj_100g"] / 4.184;
+  if (kcal == null && n["energy_100g"] != null) kcal = n["energy_100g"] / 4.184;
+  const name = p.product_name_de || p.product_name || p.generic_name_de || p.generic_name || "";
+  if (kcal == null || !name) return null;
+  const portion = Number(p.serving_quantity) > 0 ? { g: Number(p.serving_quantity), text: p.serving_size || "" } : null;
+  return { name, marke: String(p.brands || "").split(",")[0].trim(), quelle: "Open Food Facts", code: p.code, portion,
+    l: [kcal, n.proteins_100g || 0, n.fat_100g || 0, n.carbohydrates_100g || 0, n.fiber_100g || 0, n.sugars_100g || 0] };
+}
+async function eOffSuche(text) {
+  const u = `https://de.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(text)}&search_simple=1&action=process&json=1&page_size=25&fields=code,product_name,product_name_de,generic_name_de,brands,nutriments,serving_size,serving_quantity`;
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`Open Food Facts antwortet nicht (${r.status})`);
+  return ((await r.json()).products || []).map(eOffLebensmittel).filter(Boolean);
+}
+function eZuletzt() {
+  const t = eLesen(E_TAGE, {});
+  const gesehen = new Set(), liste = [];
+  for (const iso of Object.keys(t).sort().reverse()) for (const e of [...t[iso]].reverse()) {
+    const k = `${e.name}|${e.marke || ""}`;
+    if (gesehen.has(k)) continue;
+    gesehen.add(k);
+    liste.push({ name: e.name, marke: e.marke || "", l: e.l, quelle: e.quelle || "", portion: e.portion || null });
+    if (liste.length >= 25) return liste;
+  }
+  return liste;
+}
+
+/** Dialog zum Suchen, Anlegen und Eintragen. optionen: { tag, mahl, eintrag (bearbeiten), fertig } */
+function eDialog(optionen) {
+  const dlg = h("dialog", { class: "blatt-dialog e-dialog", "aria-label": "Lebensmittel eintragen" });
+  let mahl = optionen.mahl || "f";
+  const inhalt = h("div", { class: "dialog-inhalt" });
+  dlg.append(inhalt);
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  dlg.addEventListener("close", () => { dlg.remove(); });
+  const kopf = (titel, zurueck) => h("div", { class: "dialog-kopf" },
+    zurueck ? h("button", { class: "dialog-zu", type: "button", "aria-label": "Zurück", onclick: zurueck }, icon("zurueck", 20)) : null,
+    h("h2", null, titel), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: () => dlg.close() }, icon("zu", 20)));
+  const mahlAuswahl = () => {
+    const sel = h("select", { "aria-label": "Mahlzeit" }, E_MAHL.map(([id, n]) => h("option", { value: id, selected: id === mahl ? true : null }, n)));
+    sel.addEventListener("change", () => { mahl = sel.value; });
+    return sel;
+  };
+  const zeile = (lm, auswahl) => h("button", { type: "button", class: "e-treffer", onclick: () => auswahl(lm) },
+    h("span", { class: "e-t-name" }, lm.name), h("span", { class: "e-t-sub" }, [lm.marke, lm.quelle].filter(Boolean).join(" · ")),
+    h("span", { class: "e-t-kcal" }, `${zahl(Math.round(lm.l[0]))} kcal`, h("small", null, " / 100 g")));
+
+  function mengeAnsicht(lm, eintrag) {
+    let g = eintrag ? eintrag.g : (lm.portion ? lm.portion.g : 100);
+    const vorschau = h("div", { class: "e-vorschau" });
+    const aktual = () => {
+      const w = lm.l.map((v) => (v || 0) * (g || 0) / 100);
+      vorschau.replaceChildren(h("b", { class: "e-v-kcal" }, `${zahl(Math.round(w[0]))} kcal`),
+        h("div", { class: "e-v-makros" }, [["Eiweiß", w[1], E_FARBE.protein], ["Kohlenhydrate", w[3], E_FARBE.kh], ["Fett", w[2], E_FARBE.fett]].map(([n, v, f]) =>
+          h("span", null, h("i", { style: { background: f } }), `${n} ${zahl(v, 1)} g`))),
+        w[4] ? h("small", null, `Ballaststoffe ${zahl(w[4], 1)} g, Zucker ${zahl(w[5], 1)} g`) : null);
+    };
+    const feld = h("input", { type: "number", inputmode: "decimal", min: 1, max: 5000, value: g, "aria-label": "Menge in Gramm" });
+    feld.addEventListener("input", () => { g = Number(feld.value) || 0; aktual(); });
+    const chip = (text, wert) => h("button", { type: "button", class: "e-chip", onclick: () => { g = wert; feld.value = wert; aktual(); } }, text);
+    const chips = [];
+    if (lm.portion) chips.push(chip(`1 Portion (${zahl(lm.portion.g)} g)`, lm.portion.g));
+    [50, 100, 150, 200, 250].forEach((x) => chips.push(chip(`${x} g`, x)));
+    const speichern = () => {
+      if (!(g > 0)) { feld.focus(); return; }
+      const liste = eTagEintraege(optionen.tag);
+      const neu = { id: eintrag ? eintrag.id : eNeueId(), mahl, name: lm.name, marke: lm.marke || "", g: eRund(g, 1), l: lm.l.map((v) => eRund(v || 0, 2)), quelle: lm.quelle || "",
+        portion: lm.portion || null };
+      if (eintrag) { const i = liste.findIndex((x) => x.id === eintrag.id); if (i >= 0) liste[i] = neu; else liste.push(neu); } else liste.push(neu);
+      eTagSchreiben(optionen.tag, liste);
+      dlg.close();
+      optionen.fertig();
+    };
+    inhalt.replaceChildren(kopf(eintrag ? "Eintrag ändern" : "Menge wählen", eintrag ? null : () => sucheAnsicht()),
+      h("div", { class: "e-menge-kopf" }, h("b", null, lm.name), h("span", null, [lm.marke, lm.quelle].filter(Boolean).join(" · "))),
+      h("label", { class: "e-feld" }, h("span", null, "Menge"), h("div", { class: "e-zahl" }, feld, h("small", null, "g"))),
+      h("div", { class: "e-chips" }, chips), vorschau,
+      h("label", { class: "e-feld" }, h("span", null, "Mahlzeit"), mahlAuswahl()),
+      h("div", { class: "knopf-zeile" },
+        h("button", { class: "knopf", type: "button", onclick: speichern }, eintrag ? "Speichern" : "Hinzufügen"),
+        eintrag ? h("button", { class: "knopf zweit", type: "button", onclick: () => { eTagSchreiben(optionen.tag, eTagEintraege(optionen.tag).filter((x) => x.id !== eintrag.id)); dlg.close(); optionen.fertig(); } }, "Löschen") : null));
+    aktual();
+  }
+
+  function eigenAnsicht() {
+    const f = {};
+    const eingabe = (id, name, einheit, pflicht) => {
+      const i = h("input", { type: id === "name" ? "text" : "number", inputmode: id === "name" ? "text" : "decimal", min: 0, step: "any", "aria-label": name, autocomplete: "off" });
+      f[id] = i;
+      return h("label", { class: "e-feld" }, h("span", null, name + (pflicht ? "" : " (optional)")), h("div", { class: "e-zahl" }, i, einheit ? h("small", null, einheit) : null));
+    };
+    const meldung = h("p", { class: "fehlertext", hidden: true });
+    const sichern = () => {
+      const zahlWert = (id) => Number(String(f[id].value).replace(",", ".")) || 0;
+      const name = f.name.value.trim();
+      if (!name || f.kcal.value === "") { meldung.textContent = "Bitte Name und Kalorien angeben."; meldung.hidden = false; return; }
+      const lm = { name, marke: "", quelle: "Eigenes Lebensmittel", l: [zahlWert("kcal"), zahlWert("p"), zahlWert("f"), zahlWert("c"), zahlWert("fb"), zahlWert("zu")] };
+      const liste = eLesen(E_EIGENE, []);
+      liste.unshift(lm);
+      speicher.set(E_EIGENE, JSON.stringify(liste.slice(0, 200)));
+      mengeAnsicht(lm, null);
+    };
+    inhalt.replaceChildren(kopf("Eigenes Lebensmittel", () => sucheAnsicht()),
+      h("p", { class: "e-klein" }, "Alle Nährwerte beziehen sich auf 100 g oder 100 ml, wie auf der Packung."),
+      eingabe("name", "Name", "", true), eingabe("kcal", "Energie", "kcal", true), eingabe("p", "Eiweiß", "g", true), eingabe("f", "Fett", "g", true),
+      eingabe("c", "Kohlenhydrate", "g", true), eingabe("fb", "Ballaststoffe", "g", false), eingabe("zu", "Zucker", "g", false), meldung,
+      h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: sichern }, "Speichern und weiter")));
+  }
+
+  function sucheAnsicht() {
+    const feld = h("input", { type: "search", class: "e-suche", placeholder: "Lebensmittel suchen", "aria-label": "Lebensmittel suchen", autocomplete: "off", enterkeyhint: "search" });
+    const liste = h("div", { class: "e-liste" });
+    const status = h("p", { class: "e-klein e-status" });
+    const offKnopf = h("button", { type: "button", class: "knopf zweit e-off", hidden: true }, "Auch in Open Food Facts suchen (Markenprodukte)");
+    let offTreffer = [], offFehler = "", lokal = [], zaehler = 0;
+    const waehlen = (lm) => mengeAnsicht(lm, null);
+    async function zeichnen() {
+      const text = feld.value.trim();
+      const lauf = ++zaehler;
+      offKnopf.hidden = text.length < 2;
+      if (!text) {
+        const zuletzt = eZuletzt(), eigene = eLesen(E_EIGENE, []);
+        liste.replaceChildren(
+          zuletzt.length ? h("h3", { class: "e-kopf" }, "Zuletzt gegessen") : null, ...zuletzt.map((x) => zeile(x, waehlen)),
+          eigene.length ? h("h3", { class: "e-kopf" }, "Eigene Lebensmittel") : null, ...eigene.map((x) => zeile(x, waehlen)));
+        status.textContent = zuletzt.length || eigene.length ? "" : "Tippe einen Namen ein, zum Beispiel Haferflocken, Apfel oder Joghurt.";
+        return;
+      }
+      let bls = [];
+      try { bls = await eBlsLaden(); status.textContent = ""; } catch { status.textContent = "Die Lebensmitteldatenbank konnte nicht geladen werden."; }
+      if (lauf !== zaehler) return;
+      const eigen = eSuchen(eLesen(E_EIGENE, []), text, 10);
+      lokal = [...eigen, ...eSuchen(bls, text, 40)];
+      const alle = [...lokal, ...offTreffer];
+      liste.replaceChildren(...alle.map((x) => zeile(x, waehlen)));
+      if (!alle.length) status.textContent = offFehler || "Nichts gefunden. Suche online nach Markenprodukten oder lege das Lebensmittel selbst an.";
+      else status.textContent = offFehler;
+    }
+    let timer = null;
+    feld.addEventListener("input", () => { offTreffer = []; offFehler = ""; clearTimeout(timer); timer = setTimeout(zeichnen, 120); });
+    const online = async () => {
+      const text = feld.value.trim();
+      if (text.length < 2) return;
+      offKnopf.disabled = true; offKnopf.textContent = "Suche läuft …";
+      try { offTreffer = await eOffSuche(text); offFehler = offTreffer.length ? "" : "Open Food Facts hat dazu nichts gefunden."; }
+      catch (e) { offTreffer = []; offFehler = "Online-Suche gerade nicht möglich. Es gilt ein Limit von 10 Suchen pro Minute."; }
+      offKnopf.disabled = false; offKnopf.textContent = "Auch in Open Food Facts suchen (Markenprodukte)";
+      zeichnen();
+    };
+    offKnopf.addEventListener("click", online);
+    feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); online(); } });
+    inhalt.replaceChildren(kopf("Hinzufügen"),
+      h("div", { class: "e-zeile-oben" }, mahlAuswahl()),
+      feld, offKnopf,
+      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen")),
+      status, liste,
+      h("p", { class: "e-klein" }, "Quellen: ", h("a", { href: "https://www.blsdb.de", target: "_blank", rel: "noopener" }, "Bundeslebensmittelschlüssel 4.0, Max Rubner-Institut (CC BY 4.0)"),
+        " und ", h("a", { href: "https://de.openfoodfacts.org", target: "_blank", rel: "noopener" }, "Open Food Facts"),
+        " (Daten von Freiwilligen, ODbL, nicht für medizinische Zwecke). Angaben ohne Gewähr."));
+    zeichnen();
+    setTimeout(() => { if (!optionen.eintrag) feld.focus({ preventScroll: true }); }, 50);
+  }
+
+  document.body.append(dlg);
+  if (optionen.eintrag) {
+    const e = optionen.eintrag;
+    mengeAnsicht({ name: e.name, marke: e.marke, l: e.l, quelle: e.quelle, portion: e.portion }, e);
+  } else sucheAnsicht();
+  dlg.showModal();
+}
+
+function eTagRing(summe, ziel) {
+  const groesse = 150, dicke = 16, mitte = groesse / 2, rad = mitte - dicke / 2 - 2, u = 2 * Math.PI * rad;
+  const rest = ziel ? ziel.kcal - summe.kcal : null;
+  const anteil = ziel ? Math.min(1, summe.kcal / ziel.kcal) : 0;
+  const farbe = !ziel ? "#8e8e93" : rest < -0.1 * ziel.kcal ? "#ff3b30" : rest < 0 ? "#ff9f0a" : "#34c759";
+  const svg = s("svg", { viewBox: `0 0 ${groesse} ${groesse}`, width: groesse, height: groesse, role: "img", class: "ziel-ring",
+    "aria-label": ziel ? `${zahl(Math.round(summe.kcal))} von ${zahl(ziel.kcal)} kcal gegessen` : `${zahl(Math.round(summe.kcal))} kcal gegessen` });
+  svg.append(s("circle", { cx: mitte, cy: mitte, r: rad, fill: "none", stroke: "currentColor", "stroke-opacity": 0.1, "stroke-width": dicke }));
+  if (anteil > 0) svg.append(s("circle", { cx: mitte, cy: mitte, r: rad, fill: "none", stroke: farbe, "stroke-width": dicke, "stroke-linecap": "round",
+    "stroke-dasharray": `${Math.max(0.01, anteil * u)} ${u}`, transform: `rotate(-90 ${mitte} ${mitte})` }));
+  const gross = ziel ? zahl(Math.abs(Math.round(rest))) : zahl(Math.round(summe.kcal));
+  const klein = ziel ? (rest >= 0 ? "kcal übrig" : "kcal zu viel") : "kcal gegessen";
+  svg.append(s("text", { x: mitte, y: mitte + 2, "text-anchor": "middle", "font-size": 28, "font-weight": 700, fill: "currentColor" }, gross),
+    s("text", { x: mitte, y: mitte + 22, "text-anchor": "middle", "font-size": 12, fill: "currentColor", "fill-opacity": 0.6 }, klein));
+  return svg;
+}
+
+function eTagBauen(box, tag) {
+  const liste = eTagEintraege(tag), summe = eSumme(liste), ziel = E_STAND.ziel;
+  const heute = heuteIso();
+  const label = tag === heute ? "Heute" : tag === isoMinus(1) ? "Gestern" : datum(tag, "lang");
+  const wechsel = (d) => { E_STAND.tag = isoPlus(tag, d); eTagBauen(box, E_STAND.tag); };
+  const navi = h("div", { class: "e-tagnavi" },
+    h("button", { type: "button", class: "dialog-zu", "aria-label": "Vorheriger Tag", onclick: () => wechsel(-1) }, icon("zurueck", 20)),
+    h("b", null, label, tag !== heute ? h("small", null, ` ${datum(tag, "kurz")}`) : null),
+    h("button", { type: "button", class: "dialog-zu", "aria-label": "Nächster Tag", disabled: tag >= heute ? true : null, onclick: () => wechsel(1) }, icon("vor", 20)));
+  const makro = (id, name, wert, z) => h("div", { class: "e-makro" },
+    h("div", { class: "e-makro-kopf" }, h("i", { style: { background: E_FARBE[id] } }), h("span", null, name), h("b", null, zahl(Math.round(wert)), z ? h("small", null, ` / ${zahl(z)} g`) : h("small", null, " g"))),
+    h("div", { class: "e-balken" }, h("i", { style: { width: `${z ? Math.min(100, wert / z * 100) : 0}%`, background: E_FARBE[id] } })));
+  const uebersicht = h("section", { class: "abschnitt e-ziel" }, navi,
+    h("div", { class: "e-ziel-zeile" }, eTagRing(summe, ziel), h("div", { class: "e-makros" },
+      makro("protein", "Eiweiß", summe.p, ziel && ziel.protein), makro("kh", "Kohlenhydrate", summe.c, ziel && ziel.kh), makro("fett", "Fett", summe.f, ziel && ziel.fett))),
+    ziel ? h("p", { class: "e-klein" }, `Gegessen ${zahl(Math.round(summe.kcal))} von ${zahl(ziel.kcal)} kcal. Ballaststoffe ${zahl(Math.round(summe.fb))} von mindestens ${ziel.ballast} g.`)
+      : h("p", { class: "e-klein" }, "Berechne unten dein Kalorienziel, dann zeigt der Ring, wie viel noch übrig ist."));
+  const mahlzeiten = E_MAHL.map(([id, name]) => {
+    const l = liste.filter((e) => (e.mahl || "s") === id);
+    const kcal = l.reduce((a, e) => a + eWerte(e)[0], 0);
+    return h("section", { class: "abschnitt e-mahl" },
+      h("div", { class: "e-mahl-kopf" }, h("h2", null, name), h("span", null, `${zahl(Math.round(kcal))} kcal`),
+        h("button", { type: "button", class: "e-plus", "aria-label": `${name}: Lebensmittel hinzufügen`, onclick: () => eDialog({ tag, mahl: id, fertig: () => eTagBauen(box, tag) }) }, "+")),
+      l.length ? h("ul", { class: "e-eintraege" }, l.map((e) => {
+        const w = eWerte(e);
+        return h("li", null, h("button", { type: "button", onclick: () => eDialog({ tag, mahl: id, eintrag: e, fertig: () => eTagBauen(box, tag) }) },
+          h("span", { class: "e-e-name" }, e.name), h("span", { class: "e-e-sub" }, `${zahl(e.g)} g · Eiweiß ${zahl(w[1], 1)} · KH ${zahl(w[3], 1)} · Fett ${zahl(w[2], 1)}`),
+          h("span", { class: "e-e-kcal" }, zahl(Math.round(w[0])))));
+      })) : h("p", { class: "e-klein" }, "Noch nichts eingetragen."));
+  });
+  box.replaceChildren(uebersicht, ...mahlzeiten);
+}
+
+async function ansichtEssen() {
+  if (!E_STAND.tag) E_STAND.tag = heuteIso();
+  const tagBox = h("div", { class: "e-tag" });
+  const rechner = await eRechnerBauen((r) => { E_STAND.ziel = r; if (tagBox.isConnected || tagBox.childNodes.length) eTagBauen(tagBox, E_STAND.tag); });
+  E_STAND.tag = E_STAND.tag > heuteIso() ? heuteIso() : E_STAND.tag;
+  eTagBauen(tagBox, E_STAND.tag);
+  const geoeffnet = speicher.get("gesundheit.klapp.rechner");
+  if (geoeffnet == null && !E_STAND.ziel) speicher.set("gesundheit.klapp.rechner", "1");
+  return { titel: "Ernährung", knoten: [tagBox, klappAbschnitt("rechner", "Kalorienziel berechnen", "Größe, Alter, Bewegung und Ziel", ...rechner)] };
+}
+
 const NAV = [["essen", "Essen"], ["heute", "Heute"], ["koerper", "Körper"], ["herz", "Herz"], ["schlaf", "Schlaf"], ["sport", "Sport"], ["hinweise", "Hinweise"]];
 const MEHR = [["bericht", "Arztbericht (PDF)", "Alle wichtigen Werte für die Ärztin oder den Arzt"], ["tag", "Tag im Detail", "Puls, Stress, Body Battery und Schlaf eines Tages"], ["werte", "Alle Werte", "Jede Messgröße einzeln, mit Rohdaten"], ["status", "Status", "Abrufe, Verbindung und Darstellung"]];
 const ANSICHTEN = { essen: ansichtEssen, heute: ansichtHeute, koerper: ansichtKoerper, herz: ansichtHerz, schlaf: ansichtSchlaf, sport: ansichtSport, hinweise: ansichtHinweise,

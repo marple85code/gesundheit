@@ -861,3 +861,42 @@ html.karte-offen, html.karte-offen body { overflow: hidden; }
 .e-makro small, .e-klein { color: var(--tinte-3); font-size: 12.5px; line-height: 1.4; }
 .e-klein a { color: inherit; text-decoration: underline; }
 .e-werte .name { white-space: normal; }
+
+/* ---- Tagebuch (1.4.0) ---- */
+.e-tagnavi { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.e-tagnavi b { font-size: 17px; }
+.e-tagnavi b small { color: var(--tinte-3); font-weight: 500; }
+.e-tagnavi button[disabled] { opacity: 0.35; }
+.e-makro-kopf b small { color: var(--tinte-3); font-weight: 500; font-size: 12.5px; }
+.e-mahl-kopf { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.e-mahl-kopf h2 { flex: 1; margin: 0; font-size: 18px; }
+.e-mahl-kopf span { color: var(--tinte-2); font-size: 14px; }
+.e-plus { width: 36px; height: 36px; border-radius: 50%; border: 0; background: #007aff; color: #fff; font-size: 24px; line-height: 1; cursor: pointer; }
+.e-eintraege { list-style: none; margin: 0; padding: 0; }
+.e-eintraege li + li { border-top: 1px solid var(--linie); }
+.e-eintraege button { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; width: 100%; padding: 10px 0; cursor: pointer; }
+.e-e-name { font-weight: 600; }
+.e-e-sub { grid-column: 1; color: var(--tinte-3); font-size: 12.5px; }
+.e-e-kcal { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-weight: 700; }
+dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
+.e-suche { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--linie); background: var(--blatt-2, var(--wash)); color: var(--tinte); margin: 8px 0; min-height: 44px; }
+.e-zeile-oben select { font: inherit; font-size: 15px; border-radius: 10px; border: 1px solid var(--linie); padding: 8px 10px; background: var(--blatt-2, var(--wash)); color: var(--tinte); }
+.e-off { width: 100%; margin-bottom: 4px; }
+.e-leiste-knoepfe { margin: 6px 0; }
+.e-kopf { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--tinte-3); margin: 14px 0 4px; }
+.e-liste { display: grid; }
+.e-treffer { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 1fr auto; gap: 1px 12px; padding: 10px 2px; border-top: 1px solid var(--linie); cursor: pointer; }
+.e-t-name { font-weight: 600; }
+.e-t-sub { grid-column: 1; color: var(--tinte-3); font-size: 12.5px; }
+.e-t-kcal { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-weight: 700; white-space: nowrap; }
+.e-t-kcal small { color: var(--tinte-3); font-weight: 500; }
+.e-status { margin: 8px 0; }
+.e-menge-kopf { display: grid; margin: 4px 0 10px; }
+.e-menge-kopf span { color: var(--tinte-3); font-size: 13px; }
+.e-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.e-chip { border: 0; border-radius: 999px; padding: 8px 14px; background: var(--wash); color: var(--tinte); font: inherit; font-size: 14px; cursor: pointer; }
+.e-vorschau { display: grid; gap: 6px; padding: 14px; border-radius: 14px; background: var(--wash); margin: 8px 0 12px; }
+.e-v-kcal { font-size: 28px; }
+.e-v-makros { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; }
+.e-v-makros i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.e-dialog .e-feld { margin: 10px 0; }
