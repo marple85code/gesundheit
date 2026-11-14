@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.4";
+const APP_VERSION = "1.4.5";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1730,6 +1730,7 @@ async function ansichtHeute() {
 
   // ---- Kacheln
   const kacheln = [];
+  if (!E_STAND.ziel) { try { await eRechnerBauen((r) => { E_STAND.ziel = r; }); } catch { /* Ring zeigt dann „Ziel offen“ */ } }
   const ringeKachel = eTagesringe(k, heute);
   if (ringeKachel) kacheln.push(ringeKachel);
   if (bp.length) {
@@ -3869,25 +3870,28 @@ function eTagesringe(k, heute) {
   const minuten = mod != null || int != null ? (mod || 0) + 2 * (int || 0) : null; // Garmin zählt intensive Minuten doppelt
   const kcal = amTag(k.aktivkcal, heute);
   const strecke = amTag(k.strecke, heute);
-  if (schritte == null && etagen == null && minuten == null && kcal == null) return null;
   const schrittZiel = amTag(k.schrittziel, heute) || (letzter(k.schrittziel) || [])[1] || 10000;
-  const etagenZiel = 10, minutenZiel = 22; // Garmin-Standard; 150 Minuten pro Woche (WHO) entsprechen etwa 22 pro Tag
+  const minutenZiel = 22; // Garmin-Standard; 150 Minuten pro Woche (WHO) entsprechen etwa 22 pro Tag
+  const ziel = E_STAND.ziel, summe = eSumme(eTagEintraege(heute));
+  const uebrig = ziel ? ziel.kcal - summe.kcal : null;
+  const FARBEN = { kcal: "#0a84ff", schritte: "#34c759", minuten: "#ff9f0a", eiweiss: "#ff3b30", drueber: "#d70015" };
   const zeilen = [
-    ["Schritte", schritte, schrittZiel, "var(--ring-rot, #ff3b30)", ""],
-    ["Etagen", etagen, etagenZiel, "var(--ring-gruen, #34c759)", ""],
-    ["Aktive Minuten", minuten, minutenZiel, "var(--ring-blau, #0a84ff)", " Min."],
+    { name: "Kalorien übrig", farbe: uebrig != null && uebrig < 0 ? FARBEN.drueber : FARBEN.kcal, anteil: ziel ? summe.kcal / ziel.kcal : 0,
+      wert: uebrig != null ? zahl(Math.round(uebrig)) : "–", ziel: ziel ? ` / ${zahl(ziel.kcal)} kcal` : " Ziel offen" },
+    { name: "Schritte", farbe: FARBEN.schritte, anteil: schritte != null ? schritte / schrittZiel : 0, wert: schritte != null ? zahl(Math.round(schritte)) : "–", ziel: ` / ${zahl(schrittZiel)}` },
+    { name: "Aktive Minuten", farbe: FARBEN.minuten, anteil: minuten != null ? minuten / minutenZiel : 0, wert: minuten != null ? `${zahl(Math.round(minuten))} Min.` : "–", ziel: ` / ${minutenZiel}` },
+    { name: "Eiweiß", farbe: FARBEN.eiweiss, anteil: ziel && ziel.protein ? summe.p / ziel.protein : 0, wert: ziel ? `${zahl(Math.round(summe.p))} g` : "–", ziel: ziel ? ` / ${zahl(ziel.protein)} g` : "" },
   ];
-  const farben = ["#ff3b30", "#34c759", "#0a84ff"];
-  const legende = h("ul", { class: "ring-legende" }, zeilen.map(([name, wert, ziel, , einheit], i) =>
-    h("li", null, h("i", { style: { background: farben[i] } }), h("span", { class: "rl-name" }, name),
-      h("b", null, wert != null ? `${zahl(Math.round(wert))}${einheit}` : "–"), h("small", null, ` / ${zahl(ziel)}`))));
+  const legende = h("ul", { class: "ring-legende" }, zeilen.map((z) =>
+    h("li", null, h("i", { style: { background: z.farbe } }), h("span", { class: "rl-name" }, z.name), h("b", null, z.wert), h("small", null, z.ziel))));
   const extra = [];
+  if (etagen != null) extra.push(h("div", null, h("small", null, "Etagen"), h("b", null, `${zahl(Math.round(etagen))} / 10`)));
   if (kcal != null) extra.push(h("div", null, h("small", null, "Aktive Kalorien"), h("b", null, `${zahl(Math.round(kcal))} kcal`)));
   if (strecke != null) extra.push(h("div", null, h("small", null, "Strecke"), h("b", null, `${zahl(strecke, 1)} km`)));
-  const ringe = eRinge(zeilen.map(([, wert, ziel], i) => ({ anteil: wert != null ? wert / ziel : 0, farbe: farben[i] })));
-  ringe.setAttribute("aria-label", zeilen.map(([n, w, z]) => `${n} ${w != null ? zahl(Math.round(w)) : "keine Angabe"} von ${zahl(z)}`).join(", "));
-  return h("a", { class: "kachel tagesringe", href: "#sport" },
-    h("span", { class: "kachel-titel" }, "Tagesaktivität"),
+  const ringe = eRinge(zeilen.map((z) => ({ anteil: z.anteil, farbe: z.farbe })), 148, 14);
+  ringe.setAttribute("aria-label", zeilen.map((z) => `${z.name} ${z.wert}${z.ziel}`).join(", "));
+  return h("a", { class: "kachel tagesringe", href: "#essen" },
+    h("span", { class: "kachel-titel" }, "Heute im Überblick"),
     h("div", { class: "ring-zeile" }, ringe, h("div", { class: "ring-text" }, legende, extra.length ? h("div", { class: "ring-extra" }, extra) : null)));
 }
 
