@@ -945,3 +945,6 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .stand.rot .stand-version { border-left-color: rgba(255,255,255,.5); color: #fff; }
 .sync-meldung.fehler { background: color-mix(in srgb, #ff3b30 12%, var(--blatt)); border-color: #ff3b30; }
 .sync-meldung.fehler b { color: #d70015; }
+.chip-haken { display: inline-flex; align-items: center; gap: 4px; color: #34c759; }
+.chip-haken svg, .haken-gruen svg { color: #34c759; stroke: #34c759; }
+.haken-gruen { display: inline-flex; margin-left: 6px; vertical-align: middle; }

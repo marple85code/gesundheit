@@ -3338,7 +3338,7 @@ async function ansichtStatus() {
     else if (st.anmeldung_noetig) zustand = chip("neu anmelden", "kritisch");
     else if (st.ok === false) zustand = chip("Fehler beim Abruf", "ernst");
     else if (st.fehler) zustand = chip("wartet", "warnung");
-    else zustand = chip("verbunden", "gut");
+    else zustand = h("span", { class: "chip-haken" }, chip("verbunden", "gut"), icon("haken", 18));
     return h("div", { class: "quelle" },
       h("div", { class: "quelle-kopf" }, h("h3", null, name), zustand),
       st && st.letzter_erfolg ? h("p", { class: "leise" }, `Zuletzt erfolgreich ${vorZeit(st.letzter_erfolg)}`) : null,
@@ -3395,7 +3395,7 @@ async function ansichtStatus() {
       protokollKnoepfe(),
       h("p", { class: "fussnote" }, "Am Chromebook findest du die Datei in der App „Dateien“ unter „Downloads“, am Handy im Ordner „Downloads“.")),
     abschnitt("Protokoll", "Die letzten Abrufe, neueste zuerst.", protokoll.length ? h("ul", { class: "protokoll" }, protokoll.slice(-120).reverse().map(([t, stufe, text]) =>
-      h("li", { class: stufe === "fehler" ? "fehler" : "" }, h("time", null, DF.datumZeit.format(new Date(t * 1000)).replace(/\d{4}, /, "")), h("span", null, text)))) : leer("Noch kein Protokoll", "")),
+      h("li", { class: stufe === "fehler" ? "fehler" : "" }, h("time", null, DF.datumZeit.format(new Date(t * 1000)).replace(/\d{4}, /, "")), h("span", null, text), stufe === "fehler" ? null : h("span", { class: "haken-gruen", "aria-label": "erfolgreich" }, icon("haken", 16))))) : leer("Noch kein Protokoll", "")),
     h("p", { class: "fussnote", style: { marginTop: "32px" } }, `App ${APP_VERSION}, Datenstand ${idx.stand ? DF.datumZeit.format(new Date(idx.stand)) : "–"}.`),
   ];
   return { titel: "Status", knoten };
