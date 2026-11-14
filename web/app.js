@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.2.13";
+const APP_VERSION = "1.2.14";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1345,12 +1345,22 @@ async function befundeBerechnen() {
   if (gew && p.groesse && Date.now() - gew[0] < 60 * tage) {
     const bmi = rund(gew[1] / (p.groesse * p.groesse), 1);
     const wert = zahl(bmi, 1), bezug = `${zahl(gew[1], 1)} kg bei ${zahl(p.groesse * 100)} cm`;
-    if (bmi >= 25) neu({ id: "bmi", bereich: "koerper", name: "BMI", link: "#koerper", titel: bmi >= 30 ? "BMI im Bereich Adipositas" : "BMI über dem Normalbereich",
-      wert, bezug, kurz: `BMI ${wert}, normal bis 24,9`, ziel: "18,5–24,9",
-      text: "Die WHO stuft einen BMI von 18,5 bis 24,9 als Normalgewicht ein, 25 bis 29,9 als Übergewicht und ab 30 als Adipositas. Der BMI unterscheidet allerdings nicht zwischen Muskeln und Fett – aussagekräftiger ist dein Körperfettanteil.",
-      tipps: TIPPS.abnehmen });
-    else if (bmi < 18.5) neu({ id: "bmi", bereich: "koerper", name: "BMI", link: "#koerper", titel: "BMI unter dem Normalbereich", wert, bezug,
-      kurz: `BMI ${wert}, normal ab 18,5`, ziel: "18,5–24,9", text: "Ein BMI unter 18,5 gilt als Untergewicht.",
+    // Einstufung nach den BMI-Klassen der WHO: 25–29,9 Übergewicht (leicht), ab 30 Adipositas Grad I (erhöht),
+    // ab 35 Adipositas Grad II und III (ärztlich besprechen); Untergewicht: 17–18,4 leicht, 16–16,9 mäßig, unter 16 ausgeprägt.
+    if (bmi >= 25) {
+      const grad = bmi >= 40 ? "III" : bmi >= 35 ? "II" : "I";
+      neu({ id: "bmi", bereich: "koerper", name: "BMI", link: "#koerper",
+        stufe: bmi >= 35 ? "kritisch" : bmi >= 30 ? "ernst" : "hinweis",
+        titel: bmi >= 30 ? `BMI im Bereich Adipositas Grad ${grad}` : "BMI im Bereich Übergewicht",
+        wert, bezug, kurz: bmi >= 30 ? `BMI ${wert}, Adipositas Grad ${grad}` : `BMI ${wert}, Übergewicht (normal bis 24,9)`, ziel: "18,5–24,9",
+        text: "Die WHO stuft einen BMI von 18,5 bis 24,9 als Normalgewicht ein, 25 bis 29,9 als Übergewicht, 30 bis 34,9 als Adipositas Grad I, 35 bis 39,9 als Grad II und ab 40 als Grad III. Der BMI unterscheidet allerdings nicht zwischen Muskeln und Fett – aussagekräftiger ist dein Körperfettanteil.",
+        arzt: bmi >= 35 ? "Ab einem BMI von 35 steigt das Risiko für Folgeerkrankungen deutlich. Besprich das bitte mit deiner Hausärztin oder deinem Hausarzt." : undefined,
+        tipps: TIPPS.abnehmen });
+    }
+    else if (bmi < 18.5) neu({ id: "bmi", bereich: "koerper", name: "BMI", link: "#koerper",
+      stufe: bmi < 16 ? "kritisch" : bmi < 17 ? "ernst" : "hinweis",
+      titel: bmi < 17 ? "BMI deutlich unter dem Normalbereich" : "BMI unter dem Normalbereich", wert, bezug,
+      kurz: `BMI ${wert}, normal ab 18,5`, ziel: "18,5–24,9", text: "Die WHO stuft einen BMI unter 18,5 als Untergewicht ein; unter 17 gilt es als mäßig, unter 16 als ausgeprägt.",
       arzt: "Wenn du ungewollt abnimmst, lass das ärztlich abklären.", tipps: TIPPS.zunehmen });
     else gut("bmi", "koerper", "BMI", wert, "18,5–24,9", "#koerper");
   }
@@ -1369,7 +1379,7 @@ async function befundeBerechnen() {
         const i = zoneIndex(zonen.fett, rund(g[6], 1));
         const w_ = `${zahl(g[6], 1)} %`, ziel = `${zahl(niedrig)}–${zahl(hoch - 0.1, 1)} %`;
         const text = `Nach den Referenzwerten von Gallagher und Kollegen, die aus den BMI-Grenzen der WHO abgeleitet sind, ist für ${zonen.fett.gruppe} ein Körperfettanteil von ${ziel} normal; ab ${zahl(hoch)} % gilt er als erhöht, ab ${zahl(sehr)} % entspricht er dem Bereich der Adipositas. Die Waage schätzt den Wert über den elektrischen Widerstand des Körpers.`;
-        if (i >= 2) neu({ id: "fett", bereich: "koerper", name: "Körperfettanteil", link: "#koerper", titel: i === 3 ? "Körperfettanteil stark erhöht" : "Körperfettanteil erhöht",
+        if (i >= 2) neu({ id: "fett", bereich: "koerper", name: "Körperfettanteil", link: "#koerper", stufe: i === 3 ? "ernst" : "hinweis", titel: i === 3 ? "Körperfettanteil stark erhöht" : "Körperfettanteil erhöht",
           wert: w_, bezug, kurz: `Normal ${ziel}`, ziel, text, tipps: TIPPS.abnehmen });
         else if (i === 0) neu({ id: "fett", bereich: "koerper", name: "Körperfettanteil", link: "#koerper", titel: "Körperfettanteil niedrig",
           wert: w_, bezug, kurz: `Normal ${ziel}`, ziel, text, tipps: TIPPS.zunehmen });
