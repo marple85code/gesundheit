@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.6.1";
+const APP_VERSION = "1.6.2";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1960,6 +1960,56 @@ async function sportAbgleichen(z) {
   return {};
 }
 
+// ---- Doppelte Aktivitäten (zum Beispiel Rollentrainer: Uhr und Trainings-App zeichnen parallel auf)
+const S_DOPPELT = "gesundheit.sport.doppelt";
+function doppeltGelesen() { try { return JSON.parse(speicher.get(S_DOPPELT) || "{}") || {}; } catch { return {}; } }
+function aktivitaetenUeberlappung(liste) {
+  const grenze = Date.now() - 21 * 86400000, erledigt = doppeltGelesen();
+  const l = liste.map((a) => ({ a, von: Date.parse(String(a.start || "").replace(" ", "T")), d: (a.dauer || 0) * 1000 }))
+    .filter((x) => Number.isFinite(x.von) && x.d > 120000 && x.von >= grenze).sort((p, q) => p.von - q.von);
+  const paare = [];
+  for (let i = 0; i < l.length; i++) for (let j = i + 1; j < l.length && l[j].von < l[i].von + l[i].d; j++) {
+    const ueber = Math.min(l[i].von + l[i].d, l[j].von + l[j].d) - l[j].von;
+    if (ueber < 0.5 * Math.min(l[i].d, l[j].d)) continue;
+    const schluessel = [l[i].a.id, l[j].a.id].sort().join("|");
+    if (!erledigt[schluessel]) paare.push({ schluessel, a: l[i].a, b: l[j].a });
+  }
+  return paare;
+}
+let doppeltOffen = false;
+async function doppelteFragen() {
+  if (doppeltOffen || document.querySelector("dialog[open]")) return;
+  let paare;
+  try { paare = aktivitaetenUeberlappung(await Daten.aktivitaeten()); } catch { return; }
+  if (!paare.length) return;
+  const p = paare[0];
+  doppeltOffen = true;
+  const dlg = h("dialog", { class: "blatt-dialog e-dialog", "aria-label": "Doppelte Aktivität" });
+  const gewaehlt = new Set();
+  const loeschen = h("button", { class: "knopf", type: "button", disabled: true, style: { background: "#ff3b30" } }, "Ausgewählte löschen");
+  const aktualisieren = () => { loeschen.disabled = gewaehlt.size !== 1; };
+  const zeile = (a) => {
+    const kasten = h("input", { type: "checkbox", "aria-label": "Zum Löschen auswählen", style: { width: "24px", height: "24px", flex: "none" } });
+    kasten.addEventListener("change", () => { if (kasten.checked) gewaehlt.add(a.id); else gewaehlt.delete(a.id); aktualisieren(); });
+    const teile = [`${a.start.slice(11, 16)} Uhr`, dauer(a.dauer, false)];
+    if (a.distanz) teile.push(`${zahl(a.distanz / 1000, 1)} km`);
+    if (a.hf) teile.push(`Puls ${zahl(a.hf)}`);
+    return h("label", { style: { display: "flex", gap: "12px", alignItems: "center", padding: "12px 0", borderTop: "1px solid var(--linie)" } }, kasten,
+      h("span", { style: { flex: 1 } }, h("b", { style: { display: "block" } }, a.name || sportName(a.typ)), h("span", { class: "e-klein" }, teile.join(" · "))));
+  };
+  const zu = () => { dlg.close(); };
+  const merken = () => { const m = doppeltGelesen(); m[p.schluessel] = 1; speicher.set(S_DOPPELT, JSON.stringify(m)); };
+  loeschen.addEventListener("click", () => { merken(); const id = [...gewaehlt][0]; zu(); sportAendern(id, { x: 1 }); });
+  dlg.append(h("div", { class: "dialog-inhalt" },
+    h("div", { class: "dialog-kopf" }, h("h2", null, "Zwei Aktivitäten zur selben Zeit"), h("button", { class: "dialog-zu", type: "button", "aria-label": "Später entscheiden", onclick: zu }, icon("zu", 20))),
+    h("p", { class: "e-klein" }, `Am ${datum(p.a.start.slice(0, 10), "wochentag")} gibt es zwei Aufzeichnungen, die sich überschneiden. Möchtest du eine davon aus der App entfernen? Bei Garmin bleibt alles erhalten.`),
+    zeile(p.a), zeile(p.b),
+    h("div", { class: "knopf-zeile" }, loeschen,
+      h("button", { class: "knopf zweit", type: "button", onclick: () => { merken(); zu(); } }, "Beide behalten"))));
+  dlg.addEventListener("close", () => { dlg.remove(); doppeltOffen = false; setTimeout(doppelteFragen, 600); });
+  document.body.append(dlg); dlg.showModal();
+}
+
 function aktivitaetZeile(a) {
   const laufen = istLauf(a.typ);
   const zahlen = [];
@@ -3797,7 +3847,7 @@ const Sync = {
       await warte(2500);
       if (nr !== this.nr) return;
     }
-    Daten.cache.clear(); standZeigen(); neuZeichnen();
+    Daten.cache.clear(); standZeigen(); neuZeichnen(); setTimeout(doppelteFragen, 1200);
     const q = (Daten.index && Daten.index.quellen) || {};
     const probleme = [["Withings", q.withings], ["Garmin", q.garmin]].filter(([, st]) => st && st.verbunden && (st.anmeldung_noetig || st.ok === false || st.fehler));
     const stand = Daten.index && Daten.index.stand ? `${uhr(Date.parse(Daten.index.stand))} Uhr` : "";
@@ -4993,6 +5043,7 @@ async function start() {
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
   await route();
+  setTimeout(doppelteFragen, 2000);
   Sync.fortsetzen();
   Daten.profilAbholen().catch(() => {});
   eAbgleichPlanen(2500);
@@ -5002,7 +5053,7 @@ async function start() {
     if (document.hidden) return;
     const alt = Daten.index && Daten.index.stand;
     try { await Daten.ladeIndex(); } catch { return; }
-    if (Daten.index && Daten.index.stand !== alt) { Daten.cache.clear(); standZeigen(); neuZeichnen(); } else standZeigen();
+    if (Daten.index && Daten.index.stand !== alt) { Daten.cache.clear(); standZeigen(); neuZeichnen(); setTimeout(doppelteFragen, 1200); } else standZeigen();
     Daten.profilAbholen().catch(() => {});
     eAbgleichPlanen(500);
   }, 10 * 60 * 1000);
