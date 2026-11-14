@@ -2,7 +2,7 @@
 (() => {
   "use strict";
   const GROESSEN = { story: [1080, 1920, "Story"], feed: [1080, 1350, "Feed"] };
-  const LAYOUTS = [["garmin", "Garmin"], ["strava", "Strava"], ["fitness", "Fitness"], ["wahoo", "Wahoo und Polar"], ["suunto", "Suunto"], ["glas", "Glas"]];
+    const LAYOUTS = [["garmin", "Garmin"], ["strava", "Strava"], ["fitness", "Fitness"], ["wahoo", "Wahoo und Polar"], ["suunto", "Suunto"], ["glas", "Glas"]];
   const HINTERGRUENDE = [
     ["sonne", "Sonnenaufgang", [[0, "#2b4a7a"], [0.45, "#e8886a"], [0.62, "#f7c27a"]], ["#3d5a4a", "#223a30"]],
     ["nacht", "Nacht", [[0, "#0b1230"], [0.6, "#27407a"], [0.85, "#5b6fa8"]], ["#1b2a3a", "#0e1822"]],
@@ -110,12 +110,11 @@
     },
     strava(c, W, H, d, bg) {
       hintergrund(c, W, H, bg); c.fillStyle = "rgba(0,0,0,.25)"; c.fillRect(0, 0, W, H);
-      const routeH = H > 1600 ? 700 : 430, route = projizieren(d.track, 120, H > 1600 ? 200 : 100, W - 240, routeH, 0.05);
+      const routeH = H > 1600 ? 700 : 330, route = projizieren(d.track, 120, H > 1600 ? 200 : 100, W - 240, routeH, 0.05);
       if (route) linie(c, route, "#fc4c02", 11, { schatten: 18, punkte: false });
-      const werte = werteListe(d, "distanz", "auf", "zeit", "tempo").slice(0, route ? 4 : 4), abstand = H > 1600 ? 150 : 96;
-      let y = (route ? (H > 1600 ? 1010 : 630) : H * 0.35);
+      const werte = werteListe(d, "distanz", "auf", "zeit", "tempo").slice(0, route ? 4 : 4), abstand = H > 1600 ? 150 : 128;
+      let y = (route ? (H > 1600 ? 1010 : 500) : H * 0.35);
       werte.forEach((w) => { text(c, w.l, W / 2, y, 32, { ausrichtung: "center", farbe: "rgba(255,255,255,.92)", schatten: 12 }); text(c, w.v + (w.e ? " " + w.e : ""), W / 2, y + 66, 76, { ausrichtung: "center", gewicht: 700, schrift: "Montserrat, " + SCHRIFT, schatten: 14 }); y += abstand; });
-      const bx = W / 2 - 150; logo(c, bx, H - 160, 80); text(c, "GAWI", bx + 105, H - 103, 50, { gewicht: 800, schrift: "Montserrat, " + SCHRIFT, spur: 2, schatten: 10 });
     },
     fitness(c, W, H, d) {
       c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
@@ -129,7 +128,6 @@
       const yp = 380 + Math.ceil(werte.length / 2) * zeile + 20, hp = H - 180 - yp;
       if (d.track && hp > 260) { const r = projizieren(d.track, 70, yp, W - 140, hp - 60, 0.04); linie(c, r, "#a4ff3b", 9, { punkte: false }); }
       else if (hp > 150) profil(c, d, 70, yp, W - 140, hp - 20, "#30d5e8");
-      text(c, "Mit GaWi geteilt", 70, H - 105, 34, { farbe: "#8e8e93" }); logo(c, W - 160, H - 160, 90);
     },
     wahoo(c, W, H, d) {
       topo(c, W, H, "#101216", "#1c2128");
@@ -145,11 +143,11 @@
     suunto(c, W, H, d) {
       topo(c, W, H, "#f4f1ea", "#d9d2c0");
       text(c, `${d.datum}`.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: "#666", spur: 3 }); text(c, d.titel, 60, 205, 70, { schrift: SCHMAL, gewicht: 700, farbe: "#111" }); logo(c, W - 156, 90, 96);
-      const hp = H > 1600 ? 640 : 520, r = projizieren(d.track, 60, 260, W - 120, H - hp - 300, 0.08); linie(c, r, "#e8112d", 13, { punkte: true });
-      c.fillStyle = "#14171c"; rundRechteck(c, 0, H - hp, W, hp + 60, 44); c.fill();
-      profil(c, d, 0, H - hp + 40, W, hp - 330, "#ff9f0a");
+      const hp = H > 1600 ? 640 : 520, r = projizieren(d.track, 60, 260, W - 120, H - hp - 300, 0.08); linie(c, r, "#ff3b30", 13, { punkte: true });
+      c.fillStyle = "#1c1c1e"; rundRechteck(c, 0, H - hp, W, hp + 60, 44); c.fill();
+      profil(c, d, 0, H - hp + 40, W, hp - 330, "#0a84ff");
       const werte = [d.w.distanz, d.w.zeit, d.w.tempo, d.w.auf].filter(Boolean);
-      werte.forEach((w, i) => { const x = 60 + i * ((W - 120) / Math.max(1, werte.length)); text(c, w.v, x, H - 130, werte.length > 3 ? 84 : 96, { schrift: SCHMAL, gewicht: 700 }); text(c, (w.e || w.l).toUpperCase(), x, H - 82, 27, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 }); });
+      werte.forEach((w, i) => { const x = 60 + i * ((W - 120) / Math.max(1, werte.length)); text(c, w.v, x, H - 130, werte.length > 3 ? 84 : 96, { schrift: SCHMAL, gewicht: 700, farbe: ["#fff", "#30d158", "#0a84ff", "#ff9f0a"][i % 4] }); text(c, (w.e || w.l).toUpperCase(), x, H - 82, 27, { schrift: SCHMAL, farbe: "#8e8e93", spur: 2 }); });
     },
     glas(c, W, H, d, bg) {
       hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 1, 0.15, 0.3);
@@ -165,7 +163,14 @@
 
   function zeichnen(canvas, layout, groesse, daten, bg) {
     const [W, H] = GROESSEN[groesse]; canvas.width = W; canvas.height = H;
-    const c = canvas.getContext("2d"); c.clearRect(0, 0, W, H); ZEICHNEN[layout](c, W, H, daten, bg);
+    const c = canvas.getContext("2d"); c.clearRect(0, 0, W, H);
+    const F = 210, HI = H - F, tmp = document.createElement("canvas"); tmp.width = W; tmp.height = HI;
+    ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
+    c.drawImage(tmp, 0, 0);
+    const g = c.createLinearGradient(0, HI, 0, H); g.addColorStop(0, "#0b0b0f"); g.addColorStop(1, "#000"); c.fillStyle = g; c.fillRect(0, HI, W, F);
+    const s = 76, fy = HI + 26;
+    logo(c, W / 2 - s / 2, fy, s);
+    text(c, "Geteilt mit GaWi by N.Setz", W / 2, fy + s + 48, 32, { ausrichtung: "center", gewicht: 600, farbe: "#fff" });
   }
 
   function oeffnen(daten) {
