@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.6.3";
+const APP_VERSION = "1.6.4";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1747,7 +1747,7 @@ function auffaelligkeiten(k) {
   return aus;
 }
 function tagesformKarte(k) {
-  const f = tagesformRechnen(k, heuteIso());
+  const f = null; // Tagesform-Karte auf Wunsch entfernt
   const knoten = [];
   if (f) {
     const U = 2 * Math.PI * 48;
