@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.0.3";
+const APP_VERSION = "2.0.4";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -5024,7 +5024,7 @@ function eDialog(optionen) {
         zutatRueck ? null : h("button", { class: "knopf zweit", type: "button", onclick: gerichteAnsicht }, "Meine Gerichte")),
       status, liste);
     zeichnen();
-    setTimeout(() => { if (!optionen.eintrag) feld.focus({ preventScroll: true }); }, 50);
+    setTimeout(() => { if (!optionen.eintrag && window.matchMedia("(pointer: fine)").matches) feld.focus({ preventScroll: true }); }, 50); // am Handy erst auf Tipp, damit die Tastatur nichts verdeckt
   }
 
   document.body.append(dlg);
@@ -5107,7 +5107,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.0.3): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.0.4): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
