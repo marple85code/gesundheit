@@ -2,7 +2,7 @@
 (() => {
   "use strict";
   const GROESSEN = { story: [1080, 1920, "Story"], feed: [1080, 1350, "Feed"] };
-    const LAYOUTS = [["garmin", "Garmin"], ["strava", "Strava"], ["fitness", "Fitness"], ["wahoo", "Wahoo und Polar"], ["suunto", "Suunto"], ["glas", "Glas"]];
+    const LAYOUTS = [["suunto", "iOS Kreise"], ["garmin", "Garmin"], ["strava", "Strava"], ["fitness", "Fitness"], ["wahoo", "Wahoo und Polar"], ["glas", "Glas"]];
   const HINTERGRUENDE = [
     ["sonne", "Sonnenaufgang", [[0, "#2b4a7a"], [0.45, "#e8886a"], [0.62, "#f7c27a"]], ["#3d5a4a", "#223a30"]],
     ["nacht", "Nacht", [[0, "#0b1230"], [0.6, "#27407a"], [0.85, "#5b6fa8"]], ["#1b2a3a", "#0e1822"]],
@@ -42,6 +42,13 @@
     c.fillStyle = bg; c.fillRect(0, 0, W, H); c.strokeStyle = linie; c.lineWidth = 2;
     for (const [cx, cy, n, schritt, drehung] of [[0.62, 0.38, 28, 38, -0.3], [0.12, 0.8, 16, 34, 0]]) {
       for (let k = 1; k <= n; k++) { c.beginPath(); c.ellipse(W * cx, H * cy, k * schritt * 1.5, k * schritt, drehung, 0, Math.PI * 2); c.stroke(); }
+    }
+  }
+  function topoIos(c, W, H) {
+    c.fillStyle = "#000"; c.fillRect(0, 0, W, H); c.lineWidth = 3;
+    const fa = ["10,132,255", "94,92,230", "48,209,88", "100,210,255"];
+    for (const [cx, cy, n, schritt, drehung, f] of [[0.7, 0.3, 24, 42, -0.3, 0], [0.1, 0.62, 14, 40, 0, 2]]) {
+      for (let k = 1; k <= n; k++) { c.strokeStyle = `rgba(${fa[(f + (k % 2)) % 4]},${(0.5 - k / n * 0.38).toFixed(2)})`; c.beginPath(); c.ellipse(W * cx, H * cy, k * schritt * 1.25, k * schritt * 1.25, drehung, 0, Math.PI * 2); c.stroke(); }
     }
   }
   function abdunkeln(c, W, H, von, bis, a0, a1) {
@@ -141,10 +148,10 @@
         text(c, (w.l + (w.e ? " " + w.e : "")).toUpperCase(), x, y - 60, 25, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 }); text(c, w.v, x, y + 30, 90, { schrift: SCHMAL, kursiv: true, gewicht: 800 }); });
     },
     suunto(c, W, H, d) {
-      topo(c, W, H, "#f4f1ea", "#d9d2c0");
-      text(c, `${d.datum}`.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: "#666", spur: 3 }); text(c, d.titel, 60, 205, 70, { schrift: SCHMAL, gewicht: 700, farbe: "#111" }); logo(c, W - 156, 90, 96);
+      topoIos(c, W, H);
+      text(c, `${d.datum}`.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: "#8e8e93", spur: 3 }); text(c, d.titel, 60, 205, 70, { schrift: SCHMAL, gewicht: 700, farbe: "#fff" }); logo(c, W - 156, 90, 96);
       const hp = H > 1600 ? 640 : 520, r = projizieren(d.track, 60, 260, W - 120, H - hp - 300, 0.08); linie(c, r, "#ff3b30", 13, { punkte: true });
-      c.fillStyle = "#1c1c1e"; rundRechteck(c, 0, H - hp, W, hp + 60, 44); c.fill();
+      c.fillStyle = "rgba(44,44,46,.92)"; rundRechteck(c, 20, H - hp, W - 40, hp - 20, 48); c.fill();
       profil(c, d, 0, H - hp + 40, W, hp - 330, "#0a84ff");
       const werte = [d.w.distanz, d.w.zeit, d.w.tempo, d.w.auf].filter(Boolean);
       werte.forEach((w, i) => { const x = 60 + i * ((W - 120) / Math.max(1, werte.length)); text(c, w.v, x, H - 130, werte.length > 3 ? 84 : 96, { schrift: SCHMAL, gewicht: 700, farbe: ["#fff", "#30d158", "#0a84ff", "#ff9f0a"][i % 4] }); text(c, (w.e || w.l).toUpperCase(), x, H - 82, 27, { schrift: SCHMAL, farbe: "#8e8e93", spur: 2 }); });
@@ -175,7 +182,7 @@
 
   function oeffnen(daten) {
     const bg = { id: "sonne", bild: null };
-    let layout = "garmin", groesse = "story";
+    let layout = "suunto", groesse = "story";
     const el = (tag, attr, ...kinder) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attr || {})) { if (k === "onclick") e.onclick = v; else if (k === "style") Object.assign(e.style, v); else if (v != null) e.setAttribute(k, v); } e.append(...kinder.flat().filter((x) => x != null)); return e; };
     const dlg = el("dialog", { class: "blatt-dialog teilen-dialog", "aria-label": "Aktivität teilen" });
     const gross = el("canvas", { class: "teilen-gross", "aria-label": "Vorschau" });
