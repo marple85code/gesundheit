@@ -913,3 +913,10 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .ring-punkte { display: grid; gap: 3px; font-size: 12px; font-weight: 650; color: var(--tinte-2); font-variant-numeric: tabular-nums; min-width: 0; }
 .ring-punkte span { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 .ring-punkte i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.ring-kompakt { flex-wrap: wrap; }
+.ring-punkte { gap: 5px; flex: 1; min-width: 100px; }
+.ring-punkte span { display: flex; align-items: center; gap: 6px; }
+.ring-punkte em { font-style: normal; font-weight: 500; color: var(--tinte-3); flex: 1; }
+.ring-punkte b { font-weight: 700; color: var(--tinte); }
+.ring-punkte i { width: 9px; height: 9px; }
+.ring-punkte b, .ring-punkte em { white-space: nowrap; }

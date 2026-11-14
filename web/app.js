@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.6";
+const APP_VERSION = "1.4.7";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -3884,7 +3884,9 @@ function eTagesringe(k, heute) {
   ];
   const ringe = eRinge(zeilen.map((z) => ({ anteil: z.anteil, farbe: z.farbe })), 96, 9);
   ringe.setAttribute("aria-label", zeilen.map((z) => `${z.name} ${z.wert}${z.ziel}`).join(", "));
-  const punkte = h("div", { class: "ring-punkte" }, zeilen.slice(1).map((z) => h("span", null, h("i", { style: { background: z.farbe } }), z.wert)));
+  const kurz = ["Gegessen", "Schritte", "Aktiv", "Eiweiß"];
+  const wertKurz = [ziel ? `${zahl(Math.round(summe.kcal))}` : "–", zeilen[1].wert, zeilen[2].wert, zeilen[3].wert];
+  const punkte = h("div", { class: "ring-punkte" }, zeilen.map((z, i) => h("span", null, h("i", { style: { background: z.farbe } }), h("em", null, kurz[i]), h("b", null, wertKurz[i]))));
   return h("a", { class: "kachel tagesringe", href: "#essen" },
     h("span", { class: "kachel-titel" }, "Heute im Überblick"),
     h("span", { class: "kachel-wert" }, zeilen[0].wert, h("small", null, uebrig != null && uebrig < 0 ? "kcal drüber" : "kcal übrig")),
