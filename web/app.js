@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "1.4.8";
+const APP_VERSION = "1.4.9";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -4002,6 +4002,7 @@ async function eRechnerBauen(zielMelden) {
 const E_TAGE = "gesundheit.ernaehrung.tage", E_EIGENE = "gesundheit.ernaehrung.eigene";
 const E_MAHL = [["f", "Frühstück"], ["m", "Mittagessen"], ["a", "Abendessen"], ["s", "Snacks"]];
 const E_STAND = { tag: null, ziel: null };
+const E_GERICHTE = "gesundheit.ernaehrung.gerichte", E_GERICHTZ = "gesundheit.ernaehrung.gerichtzeit";
 const E_ZEIT = "gesundheit.ernaehrung.zeit", E_STAMMZ = "gesundheit.ernaehrung.stammzeit", E_OFFEN = "gesundheit.ernaehrung.offen";
 const E_ABG = { laeuft: false, nochmal: false, timer: null, runden: 0, text: "", gesendet: {}, aktualisieren: null };
 function eStatus(text) { E_ABG.text = text; if (E_ABG.aktualisieren) E_ABG.aktualisieren(); }
@@ -4019,11 +4020,11 @@ async function eCloudLesen(pfad) {
   try { return { daten: await entschluesseln(pfad, await r.arrayBuffer()) }; } catch { return { fehler: true }; }
 }
 /** Verschlüsselt in die Cloud legen (Ablauf ernaehrung.yml). Gibt true zurück, wenn ein Abruf gestartet wurde. */
-async function ePush(z, pfad, objekt) {
+async function ePush(z, pfad, objekt, leise) {
   const json = JSON.stringify(objekt), alt = E_ABG.gesendet[pfad];
   if (alt && alt.json === json && Date.now() - alt.zeit < 5 * 60 * 1000) return true;
   const b64 = b64d(await verschluesselnPaket(pfad, objekt));
-  if (b64.length > 60000) { eStatus("Dieser Monat ist zu groß für den Abgleich und bleibt auf diesem Gerät."); return false; }
+  if (b64.length > 60000) { if (!leise) eStatus("Diese Daten sind zu groß für den Abgleich und bleiben auf diesem Gerät."); return false; }
   const name = pfad.replace(/^d\/ernaehrung\//, "").replace(/\.enc$/, "");
   await Sync.rufe(z, "POST", `/repos/${z.repo}/actions/workflows/ernaehrung.yml/dispatches`, { ref: z.zweig || "main", inputs: { datei: name, inhalt: b64 } });
   E_ABG.gesendet[pfad] = { json, zeit: Date.now() };
@@ -4073,6 +4074,33 @@ async function eStammAbgleichen(z) {
   }
   return {};
 }
+/** Eigene Gerichte (mit kleinen Fotos) */
+function eGerichteGeaendert() {
+  speicher.set(E_GERICHTZ, String(Date.now()));
+  E_ABG.runden = 0;
+  eAbgleichPlanen(4000);
+}
+async function eGerichteAbgleichen(z) {
+  const pfad = "d/ernaehrung/gerichte.enc";
+  const c = await eCloudLesen(pfad);
+  if (c.fehler) return { fehler: true };
+  const lz = Number(speicher.get(E_GERICHTZ)) || 0, cz = (c.daten && c.daten.z) || 0;
+  const lokal = eLesen(E_GERICHTE, []);
+  if (cz > lz) {
+    const fotos = new Map(lokal.filter((x) => x.foto).map((x) => [x.id, x.foto]));
+    const neu = ((c.daten && c.daten.gerichte) || []).map((x) => ({ ...x, foto: x.foto || fotos.get(x.id) || null }));
+    speicher.set(E_GERICHTE, JSON.stringify(neu));
+    speicher.set(E_GERICHTZ, String(cz));
+    return { neu: true };
+  }
+  if (lz > cz || (!cz && lokal.length)) {
+    const zeit = lz || Date.now();
+    if (!lz) speicher.set(E_GERICHTZ, String(zeit));
+    if (!(await ePush(z, pfad, { z: zeit, gerichte: lokal }, true))) await ePush(z, pfad, { z: zeit, gerichte: lokal.map((x) => ({ ...x, foto: null })) });
+    return { hoch: true };
+  }
+  return {};
+}
 async function eAbgleichen() {
   if (E_ABG.laeuft) { E_ABG.nochmal = true; return; }
   E_ABG.laeuft = true;
@@ -4093,6 +4121,8 @@ async function eAbgleichen() {
     }
     const st = await eStammAbgleichen(z);
     if (st.fehler) fehler = true; else { if (st.neu) stammNeu = true; if (st.hoch) hoch = true; }
+    const ge = await eGerichteAbgleichen(z);
+    if (ge.fehler) fehler = true; else { if (ge.neu) neu = true; if (ge.hoch) hoch = true; }
     speicher.set(E_OFFEN, JSON.stringify([...offen]));
     if (fehler) eStatus("Abgleich nicht möglich. Bist du online? Die Daten bleiben auf diesem Gerät.");
     else if (hoch || offen.size) {
@@ -4233,6 +4263,14 @@ async function eScanStarten(video, treffer, fehler) {
   schritt();
   return stopp;
 }
+/** Ein eigenes Gericht als Lebensmittel (Werte je 100 g, eine Portion = Gesamtmenge / Portionen) */
+function eGerichtLm(g) {
+  const gesamt = g.zutaten.reduce((a, x) => a + (x.g || 0), 0) || 1;
+  const summe = [0, 0, 0, 0, 0, 0];
+  for (const x of g.zutaten) eWerte(x).forEach((v, i) => { summe[i] += v; });
+  const por = Math.max(1, Number(g.portionen) || 1);
+  return { name: g.name, marke: "", quelle: "Eigenes Gericht", l: summe.map((v) => v / gesamt * 100), portion: { g: eRund(gesamt / por, 1), text: "1 Portion" }, foto: g.foto || null, gerichtId: g.id };
+}
 function eZuletzt() {
   const t = eLesen(E_TAGE, {});
   const gesehen = new Set(), liste = [];
@@ -4284,6 +4322,7 @@ function eDialog(optionen) {
     [50, 100, 150, 200, 250].forEach((x) => chips.push(chip(`${x} g`, x)));
     const speichern = () => {
       if (!(g > 0)) { feld.focus(); return; }
+      if (zutatRueck) { const f = zutatRueck; zutatRueck = null; f({ name: lm.name, marke: lm.marke || "", quelle: lm.quelle || "", l: lm.l.map((v) => eRund(v || 0, 2)) }, eRund(g, 1)); return; }
       const liste = eTagEintraege(optionen.tag);
       const neu = { id: eintrag ? eintrag.id : eNeueId(), mahl, name: lm.name, marke: lm.marke || "", g: eRund(g, 1), l: lm.l.map((v) => eRund(v || 0, 2)), quelle: lm.quelle || "",
         portion: lm.portion || null };
@@ -4296,9 +4335,9 @@ function eDialog(optionen) {
       h("div", { class: "e-menge-kopf" }, h("b", null, lm.name), h("span", null, [lm.marke, lm.quelle].filter(Boolean).join(" · "))),
       h("label", { class: "e-feld" }, h("span", null, "Menge"), h("div", { class: "e-zahl" }, feld, h("small", null, "g"))),
       h("div", { class: "e-chips" }, chips), vorschau,
-      h("label", { class: "e-feld" }, h("span", null, "Mahlzeit"), mahlAuswahl()),
+      zutatRueck ? null : h("label", { class: "e-feld" }, h("span", null, "Mahlzeit"), mahlAuswahl()),
       h("div", { class: "knopf-zeile" },
-        h("button", { class: "knopf", type: "button", onclick: speichern }, eintrag ? "Speichern" : "Hinzufügen"),
+        h("button", { class: "knopf", type: "button", onclick: speichern }, eintrag ? "Speichern" : zutatRueck ? "Zutat übernehmen" : "Hinzufügen"),
         eintrag ? h("button", { class: "knopf zweit", type: "button", onclick: () => { eTagSchreiben(optionen.tag, eTagEintraege(optionen.tag).filter((x) => x.id !== eintrag.id)); dlg.close(); optionen.fertig(); } }, "Löschen") : null));
     aktual();
   }
@@ -4329,8 +4368,8 @@ function eDialog(optionen) {
       h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: sichern }, "Speichern und weiter")));
   }
 
-  let scanStopp = null;
-  dlg.addEventListener("close", () => { if (scanStopp) { scanStopp(); scanStopp = null; } });
+  let scanStopp = null, zutatRueck = null, entwurf = null;
+  dlg.addEventListener("close", () => { zutatRueck = null; entwurf = null; if (scanStopp) { scanStopp(); scanStopp = null; } });
   function scanAnsicht(vorgabe) {
     const video = h("video", { playsinline: true, muted: true, autoplay: true });
     const status = h("p", { class: "e-klein e-status" }, "Halte den Strichcode des Produkts in den Rahmen.");
@@ -4358,6 +4397,75 @@ function eDialog(optionen) {
     if (vorgabe) suchen(vorgabe); else starten();
   }
 
+  const foto = (src, klasse = "e-foto") => (src ? h("img", { class: klasse, src, alt: "" }) : h("span", { class: `${klasse} leer` }, icon("essen", 20)));
+  function gerichteAnsicht() {
+    const liste = eLesen(E_GERICHTE, []);
+    inhalt.replaceChildren(kopf("Meine Gerichte", () => sucheAnsicht()),
+      h("p", { class: "e-klein" }, "Eigene Rezepte und Mahlzeiten, die du immer wieder einträgst. Antippen trägt sie in die Mahlzeit ein."),
+      h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => { entwurf = null; gerichtEditor(null); } }, "Neues Gericht anlegen")),
+      h("div", { class: "e-liste" }, liste.length ? liste.map((g) => {
+        const lm = eGerichtLm(g), kcal = Math.round(lm.l[0] * lm.portion.g / 100);
+        return h("div", { class: "e-gericht" },
+          h("button", { type: "button", class: "e-treffer e-gericht-wahl", onclick: () => mengeAnsicht(lm, null) }, foto(g.foto),
+            h("span", { class: "e-g-text" }, h("span", { class: "e-t-name" }, g.name), h("span", { class: "e-t-sub" }, `${g.zutaten.length} Zutaten · ${zahl(Number(g.portionen) || 1)} Portion${(Number(g.portionen) || 1) === 1 ? "" : "en"}`)),
+            h("span", { class: "e-t-kcal" }, `${zahl(kcal)} kcal`, h("small", null, " / Portion"))),
+          h("button", { type: "button", class: "e-link", onclick: () => { entwurf = null; gerichtEditor(g); } }, "Bearbeiten"));
+      }) : h("p", { class: "e-klein" }, "Noch keine Gerichte angelegt.")));
+  }
+  function gerichtEditor(vorlage) {
+    if (vorlage !== undefined) entwurf = vorlage ? JSON.parse(JSON.stringify(vorlage)) : { id: eNeueId(), name: "", foto: null, portionen: 1, zutaten: [] };
+    if (!entwurf) entwurf = { id: eNeueId(), name: "", foto: null, portionen: 1, zutaten: [] };
+    const d = entwurf, istNeu = !eLesen(E_GERICHTE, []).some((x) => x.id === d.id);
+    const meldung = h("p", { class: "fehlertext", hidden: true });
+    const name = h("input", { type: "text", class: "e-suche", placeholder: "Name des Gerichts", value: d.name, "aria-label": "Name des Gerichts", autocomplete: "off" });
+    name.addEventListener("input", () => { d.name = name.value; });
+    const portionen = h("input", { type: "number", inputmode: "decimal", min: 1, step: 1, value: d.portionen, "aria-label": "Anzahl Portionen" });
+    const summe = h("p", { class: "e-klein e-g-summe" });
+    const aktual = () => { d.portionen = Number(portionen.value) || 1; if (!d.zutaten.length) { summe.textContent = "Noch keine Zutaten."; return; } const lm = eGerichtLm(d); summe.textContent = `Pro Portion ungefähr ${zahl(Math.round(lm.l[0] * lm.portion.g / 100))} kcal, Eiweiß ${zahl(eRund(lm.l[1] * lm.portion.g / 100, 1), 1)} g, Kohlenhydrate ${zahl(eRund(lm.l[3] * lm.portion.g / 100, 1), 1)} g, Fett ${zahl(eRund(lm.l[2] * lm.portion.g / 100, 1), 1)} g.`; };
+    portionen.addEventListener("input", aktual);
+    const bild = h("div", { class: "e-foto-box" }, foto(d.foto, "e-foto gross"));
+    const datei = h("input", { type: "file", accept: "image/*", hidden: true });
+    datei.addEventListener("change", async () => {
+      const f = datei.files && datei.files[0]; if (!f) return;
+      try {
+        const url = await new Promise((ok, nein) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = nein; r.readAsDataURL(f); });
+        d.foto = await bildVerkleinern(url, 144, 0.7);
+        bild.replaceChildren(foto(d.foto, "e-foto gross"));
+      } catch { meldung.textContent = "Das Foto konnte nicht gelesen werden."; meldung.hidden = false; }
+    });
+    const zutatenListe = h("ul", { class: "e-zutaten" }, d.zutaten.map((x, i) => {
+      const gi = h("input", { type: "number", inputmode: "decimal", min: 1, max: 5000, value: x.g, "aria-label": `Menge ${x.name}` });
+      const kc = h("span", { class: "e-z-kcal" }, `${zahl(Math.round(eWerte(x)[0]))} kcal`);
+      gi.addEventListener("input", () => { x.g = Number(gi.value) || 0; kc.textContent = `${zahl(Math.round(eWerte(x)[0]))} kcal`; aktual(); });
+      return h("li", null, h("span", { class: "e-z-name" }, x.name), h("div", { class: "e-zahl" }, gi, h("small", null, "g")), kc,
+        h("button", { type: "button", class: "dialog-zu", "aria-label": `${x.name} entfernen`, onclick: () => { d.zutaten.splice(i, 1); gerichtEditor(); } }, icon("zu", 18)));
+    }));
+    const sichern = () => {
+      d.name = name.value.trim(); d.portionen = Number(portionen.value) || 1;
+      if (!d.name) { meldung.textContent = "Bitte gib dem Gericht einen Namen."; meldung.hidden = false; name.focus(); return; }
+      if (!d.zutaten.length || d.zutaten.some((x) => !(x.g > 0))) { meldung.textContent = "Füge mindestens eine Zutat mit Menge hinzu."; meldung.hidden = false; return; }
+      const alle = eLesen(E_GERICHTE, []), i = alle.findIndex((x) => x.id === d.id);
+      if (i >= 0) alle[i] = d; else alle.unshift(d);
+      speicher.set(E_GERICHTE, JSON.stringify(alle.slice(0, 100)));
+      eGerichteGeaendert();
+      entwurf = null;
+      gerichteAnsicht();
+    };
+    const loeschen = () => {
+      speicher.set(E_GERICHTE, JSON.stringify(eLesen(E_GERICHTE, []).filter((x) => x.id !== d.id)));
+      eGerichteGeaendert(); entwurf = null; gerichteAnsicht();
+    };
+    inhalt.replaceChildren(kopf(istNeu ? "Neues Gericht" : "Gericht bearbeiten", () => { entwurf = null; gerichteAnsicht(); }),
+      h("div", { class: "e-g-kopf" }, bild, h("button", { type: "button", class: "knopf zweit", onclick: () => datei.click() }, icon("kamera", 18), d.foto ? "Foto ändern" : "Foto hinzufügen"), datei),
+      name,
+      h("label", { class: "e-feld" }, h("span", null, "Ergibt"), h("div", { class: "e-zahl" }, portionen, h("small", null, "Portionen"))),
+      h("h3", { class: "e-kopf" }, "Zutaten"), zutatenListe,
+      h("div", { class: "knopf-zeile" }, h("button", { type: "button", class: "knopf zweit", onclick: () => { d.name = name.value; d.portionen = Number(portionen.value) || 1; zutatRueck = (lm, g) => { d.zutaten.push({ ...lm, g }); gerichtEditor(); }; sucheAnsicht(); } }, "Zutat hinzufügen")),
+      summe, meldung,
+      h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: sichern }, "Gericht speichern"), istNeu ? null : h("button", { class: "knopf zweit", type: "button", onclick: loeschen }, "Löschen")));
+    aktual();
+  }
+
   function sucheAnsicht() {
     const feld = h("input", { type: "search", class: "e-suche", placeholder: "Lebensmittel suchen", "aria-label": "Lebensmittel suchen", autocomplete: "off", enterkeyhint: "search" });
     const liste = h("div", { class: "e-liste" });
@@ -4365,13 +4473,15 @@ function eDialog(optionen) {
     const offKnopf = h("button", { type: "button", class: "knopf zweit e-off", hidden: true }, "Auch in Open Food Facts suchen (Markenprodukte)");
     let offTreffer = [], offFehler = "", lokal = [], zaehler = 0;
     const waehlen = (lm) => mengeAnsicht(lm, null);
+    const gerichte = () => eLesen(E_GERICHTE, []).map(eGerichtLm);
     async function zeichnen() {
       const text = feld.value.trim();
       const lauf = ++zaehler;
       offKnopf.hidden = text.length < 2;
       if (!text) {
-        const zuletzt = eZuletzt(), eigene = eLesen(E_EIGENE, []);
+        const zuletzt = eZuletzt(), eigene = eLesen(E_EIGENE, []), gl = zutatRueck ? [] : gerichte();
         liste.replaceChildren(
+          gl.length ? h("h3", { class: "e-kopf" }, "Meine Gerichte") : null, ...gl.map((x) => zeile(x, waehlen)),
           zuletzt.length ? h("h3", { class: "e-kopf" }, "Zuletzt gegessen") : null, ...zuletzt.map((x) => zeile(x, waehlen)),
           eigene.length ? h("h3", { class: "e-kopf" }, "Eigene Lebensmittel") : null, ...eigene.map((x) => zeile(x, waehlen)));
         status.textContent = zuletzt.length || eigene.length ? "" : "Tippe einen Namen ein, zum Beispiel Haferflocken, Apfel oder Joghurt.";
@@ -4381,7 +4491,7 @@ function eDialog(optionen) {
       try { bls = await eBlsLaden(); status.textContent = ""; } catch { status.textContent = "Die Lebensmitteldatenbank konnte nicht geladen werden."; }
       if (lauf !== zaehler) return;
       const eigen = eSuchen(eLesen(E_EIGENE, []), text, 10);
-      lokal = [...eigen, ...eSuchen(bls, text, 40)];
+      lokal = [...(zutatRueck ? [] : eSuchen(gerichte(), text, 5)), ...eigen, ...eSuchen(bls, text, 40)];
       const alle = [...lokal, ...offTreffer];
       liste.replaceChildren(...alle.map((x) => zeile(x, waehlen)));
       if (!alle.length) status.textContent = offFehler || "Nichts gefunden. Suche online nach Markenprodukten oder lege das Lebensmittel selbst an.";
@@ -4400,10 +4510,11 @@ function eDialog(optionen) {
     };
     offKnopf.addEventListener("click", online);
     feld.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const c = feld.value.replace(/\s/g, ""); if (/^\d{8,14}$/.test(c)) scanAnsicht(c); else online(); } });
-    inhalt.replaceChildren(kopf("Hinzufügen"),
+    inhalt.replaceChildren(kopf(zutatRueck ? "Zutat hinzufügen" : "Hinzufügen", zutatRueck ? () => { zutatRueck = null; gerichtEditor(); } : null),
       h("div", { class: "e-zeile-oben" }, mahlAuswahl()),
       feld, offKnopf,
-      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen")),
+      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen"),
+        zutatRueck ? null : h("button", { class: "knopf zweit", type: "button", onclick: gerichteAnsicht }, "Meine Gerichte")),
       status, liste,
       h("p", { class: "e-klein" }, "Quellen: ", h("a", { href: "https://www.blsdb.de", target: "_blank", rel: "noopener" }, "Bundeslebensmittelschlüssel 4.0, Max Rubner-Institut (CC BY 4.0)"),
         ", ",h("a", { href: "https://www.naehrwertdaten.ch", target: "_blank", rel: "noopener" }, "Schweizer Nährwertdatenbank, Bundesamt für Lebensmittelsicherheit und Veterinärwesen BLV"),
