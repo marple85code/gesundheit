@@ -1060,6 +1060,13 @@ const TIPPS = {
 };
 // Worauf die Einordnungen beruhen: zuerst ärztliche Leitlinien und Studien, dann Herstellerangaben (nur wo es keine ärztliche Norm gibt)
 const QUELLEN = [
+  ["Ernährung, Lebensmitteldaten: Bundeslebensmittelschlüssel 4.0, Max Rubner-Institut (CC BY 4.0)", "https://www.blsdb.de"],
+  ["Ernährung, Lebensmitteldaten: Schweizer Nährwertdatenbank, Bundesamt für Lebensmittelsicherheit und Veterinärwesen BLV", "https://www.naehrwertdaten.ch"],
+  ["Ernährung, Markenprodukte: Open Food Facts (Daten von Freiwilligen, ODbL, nicht für medizinische Zwecke, Angaben ohne Gewähr)", "https://de.openfoodfacts.org"],
+  ["Kalorienrechner: Grundumsatz nach Mifflin-St Jeor und Vergleichsstudien – eine Orientierung, keine ärztliche Beratung; bei Krankheit, Schwangerschaft oder Essstörung bitte mit Ärztin, Arzt oder Ernährungsberatung sprechen", "https://pmc.ncbi.nlm.nih.gov/articles/PMC6413219/"],
+  ["Kalorienrechner: Aktivitätsfaktoren nach den Referenzwerten der Deutschen Gesellschaft für Ernährung (DGE)", "https://www.dge.de/wissenschaft/referenzwerte/energie/"],
+  ["Kalorienrechner: Eiweißbedarf nach der DGE-Leitlinie Protein", "https://www.dge.de/wissenschaft/dge-leitlinien/leitlinie-protein/"],
+  ["Kalorienrechner: Eiweiß bei Abnehmen und Muskelaufbau nach dem ISSN-Positionspapier", "https://pmc.ncbi.nlm.nih.gov/articles/PMC13665703/"],
   ["Blutdruck: Leitlinie der Europäischen Hochdruckgesellschaft (ESH 2023), Deutsche Hochdruckliga – Mittel der Selbstmessung ab 135/85 mmHg = Bluthochdruck, optimal unter 120/80", "https://www.hochdruckliga.de/fileadmin/downloads/stellungnahmen/DHL-Stellungnahme-Zielblutdruck.pdf"],
   ["Ruhepuls: Normalbereich 60–100/min; ab 80/min höheres Herz-Kreislauf-Risiko laut Zhang und Kollegen, CMAJ 2016", "https://doi.org/10.1503/cmaj.150535"],
   ["QTc-Zeit: Empfehlung von AHA, ACCF und HRS 2009 – verlängert über 450 ms (Männer) bzw. 460 ms (Frauen), über 500 ms deutlich", "https://doi.org/10.1161/CIRCULATIONAHA.108.191096"],
@@ -3961,7 +3968,7 @@ async function eRechnerBauen(zielMelden) {
         h("div", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, "Dein Tagesziel"), h("p", null, `${E_ZIELE.find((z) => z[0] === r.ziel)[1]}${r.ziel === "halten" ? "" : r.differenz < 0 ? `, ${zahl(-r.differenz)} kcal weniger als dein Verbrauch` : `, ${zahl(r.differenz)} kcal mehr als dein Verbrauch`}`))),
         h("div", { class: "e-ziel-zeile" }, eZielRing(r), h("div", { class: "e-makros" },
           makro("protein", "Eiweiß", r.protein, r.proteinProKg), makro("kh", "Kohlenhydrate", r.kh), makro("fett", "Fett", r.fett))),
-        h("p", { class: "e-klein" }, `Ballaststoffe: mindestens ${r.ballast} g pro Tag.`)),
+        h("div", { class: "e-ballast" }, `Ballaststoffe: mindestens ${r.ballast} g pro Tag`)),
       r.hinweise.length ? hinweis(r.hinweise, "warnung", "achtung") : null,
       h("section", { class: "abschnitt" },
         h("div", { class: "abschnitt-kopf" }, h("div", null, h("h2", null, "So wurde gerechnet"))),
@@ -3972,13 +3979,7 @@ async function eRechnerBauen(zielMelden) {
           r.proWoche ? h("li", null, h("span", { class: "name" }, "Erwartete Abnahme pro Woche"), h("span", { class: "zahl" }, `etwa ${zahl(r.proWoche, 1)}`, h("small", null, "kg"))) : null,
           h("li", null, h("span", { class: "name" }, `Eiweiß: ${zahl(r.proteinProKg, 1)} g pro kg (Bezugsgewicht ${zahl(r.refGewicht, 1)} kg)`), h("span", { class: "zahl" }, zahl(r.protein), h("small", null, "g"))),
           h("li", null, h("span", { class: "name" }, "Fett: 30 % der Energie"), h("span", { class: "zahl" }, zahl(r.fett), h("small", null, "g"))),
-          h("li", null, h("span", { class: "name" }, "Kohlenhydrate: der Rest"), h("span", { class: "zahl" }, zahl(r.kh), h("small", null, "g")))),
-        h("p", { class: "e-klein" }, "Quellen: Grundumsatz nach ",
-          h("a", { href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC6413219/", target: "_blank", rel: "noopener" }, "Mifflin-St Jeor und Vergleichsstudien"),
-          ", Aktivitätsfaktoren nach ", h("a", { href: "https://www.dge.de/wissenschaft/referenzwerte/energie/", target: "_blank", rel: "noopener" }, "DGE-Referenzwerten"),
-          ", Eiweiß nach ", h("a", { href: "https://www.dge.de/wissenschaft/dge-leitlinien/leitlinie-protein/", target: "_blank", rel: "noopener" }, "DGE-Leitlinie"),
-          " und ", h("a", { href: "https://pmc.ncbi.nlm.nih.gov/articles/PMC13665703/", target: "_blank", rel: "noopener" }, "ISSN-Positionspapier"),
-          ". Die Werte sind eine Orientierung und keine ärztliche Beratung. Bei Krankheit, Schwangerschaft oder Essstörung bitte mit Ärztin, Arzt oder Ernährungsberatung sprechen."))]
+          h("li", null, h("span", { class: "name" }, "Kohlenhydrate: der Rest"), h("span", { class: "zahl" }, zahl(r.kh), h("small", null, "g")))))]
       .filter(Boolean));
   }
 
@@ -4388,7 +4389,6 @@ function eDialog(optionen) {
       mengeAnsicht(lm, null);
     };
     inhalt.replaceChildren(kopf("Eigenes Lebensmittel", () => sucheAnsicht()),
-      h("p", { class: "e-klein" }, "Alle Nährwerte beziehen sich auf 100 g oder 100 ml, wie auf der Packung."),
       eingabe("name", "Name", "", true), eingabe("kcal", "Energie", "kcal", true), eingabe("p", "Eiweiß", "g", true), eingabe("f", "Fett", "g", true),
       eingabe("c", "Kohlenhydrate", "g", true), eingabe("fb", "Ballaststoffe", "g", false), eingabe("zu", "Zucker", "g", false), meldung,
       h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: sichern }, "Speichern und weiter")));
@@ -4427,7 +4427,6 @@ function eDialog(optionen) {
   function gerichteAnsicht() {
     const liste = eLesen(E_GERICHTE, []);
     inhalt.replaceChildren(kopf("Meine Gerichte", () => sucheAnsicht()),
-      h("p", { class: "e-klein" }, "Eigene Rezepte und Mahlzeiten, die du immer wieder einträgst. Antippen trägt sie in die Mahlzeit ein."),
       h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: () => { entwurf = null; gerichtEditor(null); } }, "Neues Gericht anlegen")),
       h("div", { class: "e-liste" }, liste.length ? liste.map((g) => {
         const lm = eGerichtLm(g), kcal = Math.round(lm.l[0] * lm.portion.g / 100);
@@ -4436,7 +4435,7 @@ function eDialog(optionen) {
             h("span", { class: "e-g-text" }, h("span", { class: "e-t-name" }, g.name), h("span", { class: "e-t-sub" }, `${g.zutaten.length} Zutaten · ${zahl(Number(g.portionen) || 1)} Portion${(Number(g.portionen) || 1) === 1 ? "" : "en"}`)),
             h("span", { class: "e-t-kcal" }, `${zahl(kcal)} kcal`, h("small", null, " / Portion"))),
           h("button", { type: "button", class: "e-link", onclick: () => { entwurf = null; gerichtEditor(g); } }, "Bearbeiten"));
-      }) : h("p", { class: "e-klein" }, "Noch keine Gerichte angelegt.")));
+      }) : null));
   }
   function gerichtEditor(vorlage) {
     if (vorlage !== undefined) entwurf = vorlage ? JSON.parse(JSON.stringify(vorlage)) : { id: eNeueId(), name: "", foto: null, portionen: 1, zutaten: [] };
@@ -4506,11 +4505,11 @@ function eDialog(optionen) {
       offKnopf.hidden = text.length < 2;
       if (!text) {
         const zuletzt = eZuletzt(), eigene = eLesen(E_EIGENE, []), gl = zutatRueck ? [] : gerichte();
-        liste.replaceChildren(
+        liste.replaceChildren(...[
           gl.length ? h("h3", { class: "e-kopf" }, "Meine Gerichte") : null, ...gl.map((x) => zeile(x, waehlen)),
           zuletzt.length ? h("h3", { class: "e-kopf" }, "Zuletzt gegessen") : null, ...zuletzt.map((x) => zeile(x, waehlen)),
-          eigene.length ? h("h3", { class: "e-kopf" }, "Eigene Lebensmittel") : null, ...eigene.map((x) => zeile(x, waehlen)));
-        status.textContent = zuletzt.length || eigene.length ? "" : "Tippe einen Namen ein, zum Beispiel Haferflocken, Apfel oder Joghurt.";
+          eigene.length ? h("h3", { class: "e-kopf" }, "Eigene Lebensmittel") : null, ...eigene.map((x) => zeile(x, waehlen))].filter(Boolean));
+        status.textContent = "";
         return;
       }
       let bls = [];
@@ -4552,11 +4551,7 @@ function eDialog(optionen) {
       feld, offKnopf,
       h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen"),
         zutatRueck ? null : h("button", { class: "knopf zweit", type: "button", onclick: gerichteAnsicht }, "Meine Gerichte")),
-      status, liste,
-      h("p", { class: "e-klein" }, "Quellen: ", h("a", { href: "https://www.blsdb.de", target: "_blank", rel: "noopener" }, "Bundeslebensmittelschlüssel 4.0, Max Rubner-Institut (CC BY 4.0)"),
-        ", ",h("a", { href: "https://www.naehrwertdaten.ch", target: "_blank", rel: "noopener" }, "Schweizer Nährwertdatenbank, Bundesamt für Lebensmittelsicherheit und Veterinärwesen BLV"),
-        " und ", h("a", { href: "https://de.openfoodfacts.org", target: "_blank", rel: "noopener" }, "Open Food Facts"),
-        " (Daten von Freiwilligen, ODbL, nicht für medizinische Zwecke). Angaben ohne Gewähr."));
+      status, liste);
     zeichnen();
     setTimeout(() => { if (!optionen.eintrag) feld.focus({ preventScroll: true }); }, 50);
   }
@@ -4601,8 +4596,7 @@ function eTagBauen(box, tag) {
   const uebersicht = h("section", { class: "abschnitt e-ziel" }, navi,
     h("div", { class: "e-ziel-zeile" }, eTagRing(summe, ziel), h("div", { class: "e-makros" },
       makro("protein", "Eiweiß", summe.p, ziel && ziel.protein), makro("kh", "Kohlenhydrate", summe.c, ziel && ziel.kh), makro("fett", "Fett", summe.f, ziel && ziel.fett))),
-    ziel ? h("p", { class: "e-klein" }, `Gegessen ${zahl(Math.round(summe.kcal))} von ${zahl(ziel.kcal)} kcal. Ballaststoffe ${zahl(Math.round(summe.fb))} von mindestens ${ziel.ballast} g.`)
-      : h("p", { class: "e-klein" }, "Berechne unten dein Kalorienziel, dann zeigt der Ring, wie viel noch übrig ist."),
+    ziel ? h("p", { class: "e-klein" }, `Ballaststoffe ${zahl(Math.round(summe.fb))} von mindestens ${ziel.ballast} g`) : null,
     h("p", { class: "e-klein e-sync" }, E_ABG.text || "Abgleich zwischen den Geräten …", " ",
       h("button", { type: "button", class: "e-link", onclick: () => { E_ABG.runden = 0; eAbgleichen().catch(() => {}); } }, "Jetzt abgleichen")));
   const mahlzeiten = E_MAHL.map(([id, name]) => {
@@ -4616,7 +4610,7 @@ function eTagBauen(box, tag) {
         return h("li", null, h("button", { type: "button", onclick: () => eDialog({ tag, mahl: id, eintrag: e, fertig: () => eTagBauen(box, tag) }) },
           h("span", { class: "e-e-name" }, e.name), h("span", { class: "e-e-sub" }, `${zahl(e.g)} g · Eiweiß ${zahl(w[1], 1)} · KH ${zahl(w[3], 1)} · Fett ${zahl(w[2], 1)}`),
           h("span", { class: "e-e-kcal" }, zahl(Math.round(w[0])))));
-      })) : h("p", { class: "e-klein" }, "Noch nichts eingetragen."));
+      })) : null);
   });
   box.replaceChildren(uebersicht, ...mahlzeiten);
 }

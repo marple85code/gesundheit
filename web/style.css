@@ -933,3 +933,4 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .e-zutaten .e-zahl input { width: 64px; }
 .e-z-kcal { font-size: 12.5px; color: var(--tinte-3); white-space: nowrap; min-width: 58px; text-align: right; }
 .e-g-summe { margin: 10px 0; }
+.e-ballast { margin-top: 8px; font-size: 12.5px; color: var(--tinte-3); }
