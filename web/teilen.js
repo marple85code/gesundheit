@@ -152,16 +152,61 @@
       werte.forEach((w, i) => { const x = 70 + (i % 3) * 330, y = H - hStat + 100 + Math.floor(i / 3) * z;
         text(c, (w.l + (w.e ? " " + w.e : "")).toUpperCase(), x, y - 60, 25, { fit: 300, schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 }); text(c, w.v, x, y + 30, 90, { fit: 300, schrift: SCHMAL, kursiv: true, gewicht: 800 }); });
     },
-    woche(c, W, H, d, bg, glas) {
-      if (glas) { hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 1, 0.15, 0.3); } else topoIos(c, W, H);
+    woche(c, W, H, d, bg, stil) {
+      stil = stil === true ? "glas" : (stil || "suunto");
+      const glas = stil === "glas", ws = d.werte.slice(0, 6), n = Math.max(1, ws.length);
       const fa = [["#0a84ff"], ["#30d158"], ["#ff9f0a"], ["#5e5ce6"], ["#ff3b30"], ["#64d2ff"]];
+      const wert = (w) => w.v + (w.e ? " " + w.e : "");
+      if (stil === "garmin") {
+        hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 0.2, 0.4, 0); abdunkeln(c, W, H, 0.3, 1, 0, 0.9);
+        logo(c, 60, 80, 84); text(c, "GaWi", 168, 138, 38, { gewicht: 600, schatten: 12 });
+        const zl = Math.ceil(n / 2), zh = H > 1600 ? 190 : 150, yEnde = H - 90, yStart = yEnde - zl * zh;
+        text(c, d.datum.toUpperCase(), 70, yStart - 120, 30, { schrift: SCHMAL, farbe: "#c8ccd0", spur: 3, max: W - 140 });
+        text(c, d.titel, 70, yStart - 40, 84, { schrift: SCHMAL, gewicht: 700, schatten: 12, max: W - 140 });
+        ws.forEach((w, i) => { const x = 70 + (i % 2) * (W / 2 - 20), y = yStart + Math.floor(i / 2) * zh + 70;
+          text(c, (w.l || "").toUpperCase(), x, y - 36, 24, { schrift: SCHMAL, farbe: "#c8ccd0", spur: 2, fit: W / 2 - 100 });
+          text(c, wert(w), x, y + 40, 78, { schrift: SCHMAL, gewicht: 700, fit: W / 2 - 100 }); });
+        return;
+      }
+      if (stil === "strava") {
+        hintergrund(c, W, H, bg); c.fillStyle = "rgba(0,0,0,.45)"; c.fillRect(0, 0, W, H);
+        logo(c, W - 156, 70, 96); text(c, d.datum.toUpperCase(), 70, 130, 30, { farbe: "#fc4c02", gewicht: 700, spur: 3, max: W - 260 });
+        text(c, d.titel, 70, 215, 80, { gewicht: 800, max: W - 260 });
+        const top = 320, zh = Math.min(190, (H - top - 80) / n);
+        ws.forEach((w, i) => { const y = top + i * zh;
+          c.fillStyle = "rgba(255,255,255,.35)"; c.fillRect(70, y, W - 140, 2);
+          text(c, (w.l || "").toUpperCase(), 70, y + zh * 0.3, 26, { farbe: "#fc4c02", gewicht: 700, spur: 2, max: W / 2 - 80 });
+          text(c, wert(w), 70, y + zh * 0.9, Math.min(88, zh * 0.42), { gewicht: 800, fit: W - 140 }); });
+        return;
+      }
+      if (stil === "fitness") {
+        c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+        c.fillStyle = "#1c1c1e"; c.beginPath(); c.arc(145, 185, 75, 0, Math.PI * 2); c.fill(); logo(c, 100, 140, 90);
+        text(c, d.titel, 250, 175, 58, { gewicht: 700, max: W - 310 }); text(c, d.datum, 250, 228, 34, { farbe: "#8e8e93", max: W - 310 });
+        const fc = ["#ffd60a", "#30d5e8", "#ff375f", "#a4ff3b", "#bf5af2", "#ff9f0a"], top = 330, zh = Math.min(200, (H - top - 40) / n);
+        ws.forEach((w, i) => { const y = top + i * zh;
+          text(c, (w.l || "").toUpperCase(), 70, y + zh * 0.26, 26, { farbe: "#8e8e93", spur: 2, max: W - 140 });
+          text(c, wert(w), 70, y + zh * 0.88, Math.min(90, zh * 0.42), { gewicht: 700, farbe: fc[i % 6], fit: W - 140 }); });
+        return;
+      }
+      if (stil === "wahoo") {
+        topo(c, W, H, "#101216", "#1c2128");
+        text(c, d.titel.toUpperCase(), 70, 150, 56, { schrift: SCHMAL, kursiv: true, gewicht: 700, farbe: "#e4002b", spur: 3, max: W - 275 }); logo(c, W - 160, 90, 90);
+        text(c, d.datum.toUpperCase(), 70, 205, 28, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 3, max: W - 275 });
+        const top = 300, zh = Math.min(200, (H - top - 40) / n);
+        ws.forEach((w, i) => { const y = top + i * zh;
+          text(c, (w.l || "").toUpperCase(), 70, y + zh * 0.26, 25, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2, max: W - 140 });
+          text(c, wert(w), 70, y + zh * 0.88, Math.min(96, zh * 0.42), { schrift: SCHMAL, kursiv: true, gewicht: 800, fit: W - 140 }); });
+        return;
+      }
+      if (glas) { hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 1, 0.15, 0.3); } else topoIos(c, W, H);
       text(c, d.datum.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: glas ? "rgba(255,255,255,.8)" : "#8e8e93", spur: 3, max: W - 230 });
       text(c, d.titel, 60, 215, 76, { schrift: SCHMAL, gewicht: 700, max: W - 230 }); logo(c, W - 156, 70, 96);
-      const ws = d.werte.slice(0, 6), top = 300, platz = H - top - 60, zh = Math.min(200, platz / Math.max(1, ws.length));
+      const top = 300, platz = H - top - 60, zh = Math.min(200, platz / n);
       c.fillStyle = glas ? "rgba(18,20,26,.66)" : "rgba(44,44,46,.92)"; rundRechteck(c, 20, top - 30, W - 40, zh * ws.length + 60, 48); c.fill();
       ws.forEach((w, i) => { const y = top + i * zh + zh * 0.62;
         text(c, (w.l || "").toUpperCase(), 70, y - zh * 0.34, 26, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 });
-        text(c, w.v + (w.e ? " " + w.e : ""), 70, y + zh * 0.12, Math.min(96, zh * 0.5), { schrift: SCHMAL, gewicht: 700, farbe: fa[i % 6][0] });
+        text(c, wert(w), 70, y + zh * 0.12, Math.min(96, zh * 0.5), { schrift: SCHMAL, gewicht: 700, farbe: fa[i % 6][0] });
         if (w.n) text(c, w.n, W - 70, y + zh * 0.1, 34, { schrift: SCHMAL, farbe: "#8e8e93", ausrichtung: "right" }); });
     },
     suunto(c, W, H, d) {
@@ -239,7 +284,7 @@
     const [W, H] = GROESSEN[groesse]; canvas.width = W; canvas.height = H;
     const c = canvas.getContext("2d"); c.clearRect(0, 0, W, H);
     const F = 210, HI = H - F, tmp = document.createElement("canvas"); tmp.width = W; tmp.height = HI;
-    if (daten.muskel) muskelKarte(tmp.getContext("2d"), W, HI, daten, layout === "mhell"); else if (daten.werte) ZEICHNEN.woche(tmp.getContext("2d"), W, HI, daten, bg, layout === "glas"); else ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
+    if (daten.muskel) muskelKarte(tmp.getContext("2d"), W, HI, daten, layout === "mhell"); else if (daten.werte) ZEICHNEN.woche(tmp.getContext("2d"), W, HI, daten, bg, layout); else ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
     c.drawImage(tmp, 0, 0);
     const hellFuss = layout === "mhell";
     const g = c.createLinearGradient(0, HI, 0, H); g.addColorStop(0, hellFuss ? "#f5f5f7" : "#0b0b0f"); g.addColorStop(1, hellFuss ? "#fff" : "#000"); c.fillStyle = g; c.fillRect(0, HI, W, F);
