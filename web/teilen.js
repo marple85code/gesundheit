@@ -196,7 +196,7 @@
     const mehr = m.akt.length > maxN ? `und ${m.akt.length - maxN} weitere Einheiten` : null;
     if (quer) {
       // Quadrat: links die Figuren und Gesamtwerte, rechts die Aktivitäten (3 bis 5 Stück, kompakt)
-      totale.forEach(([v, l], i) => { const x = P + i * (totale.length > 3 ? 112 : 165); text(c, v, x, 262, totale.length > 3 ? 42 : 54, { schrift: SCHMAL, gewicht: 700, farbe: fg }); text(c, l, x, 292, 24, { farbe: sub }); });
+      totale.forEach(([v, l], i) => { const cw = 480 / totale.length, x = P + cw * i + cw / 2; text(c, v, x, 262, totale.length > 3 ? 42 : 54, { schrift: SCHMAL, gewicht: 700, farbe: fg, ausrichtung: "center" }); text(c, l, x, 292, 24, { farbe: sub, ausrichtung: "center" }); });
       const yo = 320, fh = Math.min(500, H - yo - 70), fw = fh / 1.85;
       bilder.forEach((img, i) => { if (img) c.drawImage(img, P - 10 + i * (fw + 8), yo + 10, fw, fh); });
       const x0 = 570, bw = W - x0 - 40, top = 220, hoch = H - top - 40 - (mehr ? 30 : 0), gap = 10, n = Math.max(1, liste.length), kh = Math.min(150, (hoch - gap * (n - 1)) / n);
@@ -214,7 +214,7 @@
       if (mehr) text(c, mehr, x0 + bw / 2, H - 22, 24, { farbe: sub, ausrichtung: "center" });
       return;
     }
-    totale.forEach(([v, l], i) => { const x = P + i * (totale.length > 3 ? 245 : 330); text(c, v, x, 330, totale.length > 3 ? 76 : 88, { schrift: SCHMAL, gewicht: 700, farbe: fg }); text(c, l, x, 372, 28, { farbe: sub }); });
+    totale.forEach(([v, l], i) => { const cw = (W - 2 * P) / totale.length, x = P + cw * i + cw / 2; text(c, v, x, 330, totale.length > 3 ? 76 : 88, { schrift: SCHMAL, gewicht: 700, farbe: fg, ausrichtung: "center" }); text(c, l, x, 372, 28, { farbe: sub, ausrichtung: "center" }); });
     const gap = 14, n = Math.max(1, liste.length), kh = n > 3 ? 138 : 156, big = kh >= 150;
     const yKarten = H - 50 - n * (kh + gap) + gap - (mehr ? 40 : 0);
     const y0 = 400, fh = Math.max(250, Math.min(640, yKarten - y0 - 30)), fw = fh / 1.85;
