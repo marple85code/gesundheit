@@ -85,32 +85,41 @@
   }
 
   const FARBE = { 1: "#ffcc00", 2: "#ff9f0a", 3: "#ff3b30" };
+  const mirror = (d, cls, st) => `<path d="${d}" class="${cls}" ${st || ""}/><g transform="matrix(-1 0 0 1 200 0)"><path d="${d}" class="${cls}" ${st || ""}/></g>`;
+  const SIL = "M104 62 L108 66 C122 68 136 70 144 78 C152 84 154 94 154 104 L158 150 C160 170 162 190 162 204 C163 214 160 220 156 218 C152 216 152 206 150 196 L144 150 C142 134 140 120 138 108 L134 140 C134 160 138 180 138 196 C142 220 142 250 136 276 C133 300 131 322 126 346 L128 360 L110 362 L108 340 C104 300 104 260 102 220 L100 205 L100 64 Z";
+  const DELT = "M140 78 C150 82 154 92 152 104 C148 106 142 100 140 92 C138 86 138 80 140 78Z";
+  const ARM = ["M146 108 C152 112 154 130 154 150 C150 152 146 150 144 146 C142 134 142 118 146 108Z", "M150 156 C156 160 160 190 158 206 C154 206 152 190 150 176Z"];
+  const CALF = "M118 300 C124 304 126 326 122 344 C116 344 112 326 112 308Z";
+  const F = {
+    brust: "M104 80 C118 76 134 80 138 92 C136 106 124 114 110 112 C104 110 104 96 104 80Z",
+    bauch: ["M103 118 h14 a5 5 0 0 1 5 5 v5 a5 5 0 0 1 -5 5 h-14z", "M103 135 h14 a5 5 0 0 1 5 5 v5 a5 5 0 0 1 -5 5 h-14z", "M103 152 h13 a5 5 0 0 1 5 5 v5 a5 5 0 0 1 -5 5 h-13z", "M103 169 h12 a5 5 0 0 1 5 5 v4 a5 5 0 0 1 -5 5 h-12z"],
+    quad: "M104 208 C116 204 130 212 134 240 C134 262 130 278 124 290 C114 292 108 278 106 256 C104 236 102 220 104 208Z",
+  };
+  const B = {
+    ruecken: ["M100 64 L108 66 C120 68 134 72 140 78 C130 84 120 92 112 108 L100 118Z", "M102 112 C112 102 126 100 136 108 C136 124 132 138 120 146 L102 146Z"],
+    gesaess: "M101 196 C112 188 130 192 136 204 C136 220 124 228 108 226 C102 224 101 210 101 196Z",
+    beuger: "M104 232 C118 228 132 236 132 262 C130 276 124 288 118 292 C108 288 104 270 104 250Z",
+    wade: "M112 296 C122 296 128 312 124 336 C118 340 112 332 110 316Z",
+  };
+  function regs(seite) {
+    if (seite === "v") return { schulter: [DELT], brust: [F.brust], arm: ARM, bauch: F.bauch, quad: [F.quad], wade: [CALF] };
+    return { schulter: [DELT], ruecken: B.ruecken, arm: ARM, gesaess: [B.gesaess], beuger: [B.beuger], wade: [B.wade] };
+  }
   /** Eine Figur als SVG-Text. thema: "app" (nutzt CSS-Klassen/Variablen), "dunkel" oder "hell" (eigenstaendig, fuer das Teilen-Bild). */
   function figur(seite, stufen, breite, opt = {}) {
-    const thema = opt.thema || "app";
-    const c = (r) => ({ 0: "", 1: "m1", 2: "m2", 3: "m3" }[stufen[r] || 0]);
-    const sil = `<path d="M92 52h16v16H92z" class="s"/>
-<path d="M60 76 Q100 62 140 76 L136 192 Q100 208 64 192 Z" class="s"/>
-<rect x="30" y="78" width="22" height="104" rx="11" transform="rotate(8 41 80)" class="s"/><rect x="148" y="78" width="22" height="104" rx="11" transform="rotate(-8 159 80)" class="s"/>
-<rect x="64" y="190" width="34" height="168" rx="17" class="s"/><rect x="102" y="190" width="34" height="168" rx="17" class="s"/>`;
-    let kopf = `<circle cx="100" cy="34" r="20" class="s"/>`;
-    if (seite === "v" && opt.bild) {
-      const id = `mkc${Math.random().toString(36).slice(2, 7)}`;
-      kopf = `<defs><clipPath id="${id}"><circle cx="100" cy="34" r="20"/></clipPath></defs><circle cx="100" cy="34" r="20" class="s"/><image href="${opt.bild}" x="80" y="14" width="40" height="40" clip-path="url(#${id})" preserveAspectRatio="xMidYMid slice"/><circle cx="100" cy="34" r="20" fill="none" class="rand"/>`;
-    }
-    const e = (cx, cy, rx, ry, r, extra = "") => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" ${extra} class="mu ${c(r)}"/>`;
-    const arme = e(46, 128, 8, 22, "arm", 'transform="rotate(10 46 128)"') + e(154, 128, 8, 22, "arm", 'transform="rotate(-10 154 128)"');
-    const wade = e(80, 326, 10, 26, "wade") + e(120, 326, 10, 26, "wade");
-    const schulter = e(62, 88, 15, 12, "schulter") + e(138, 88, 15, 12, "schulter");
-    const m = seite === "v"
-      ? schulter + e(85, 108, 19, 13, "brust") + e(115, 108, 19, 13, "brust") + arme + `<rect x="86" y="128" width="28" height="56" rx="10" class="mu ${c("bauch")}"/>` + e(81, 250, 15, 46, "quad") + e(119, 250, 15, 46, "quad") + wade
-      : `<path d="M82 74 L118 74 L112 112 L88 112 Z" class="mu ${c("ruecken")}"/>` + schulter + e(78, 132, 16, 24, "ruecken") + e(122, 132, 16, 24, "ruecken") + arme + e(82, 198, 18, 16, "gesaess") + e(118, 198, 18, 16, "gesaess") + e(81, 262, 14, 40, "beuger") + e(119, 262, 14, 40, "beuger") + wade;
+    const thema = opt.thema || "app", u = "f" + Math.random().toString(36).slice(2, 8);
+    const r = regs(seite), c = (k) => ({ 0: "", 1: "m1", 2: "m2", 3: "m3" }[stufen[k] || 0]);
+    let m = "";
+    for (const k in r) r[k].forEach((d) => { m += mirror(d, "mu " + c(k), 'stroke="rgba(0,0,0,.18)" stroke-width="0.8"'); });
+    let kopf = `<ellipse cx="100" cy="30" rx="18" ry="21" class="s"/><rect x="93" y="48" width="14" height="16" class="s"/>`;
+    if (seite === "v" && opt.bild) kopf = `<rect x="93" y="48" width="14" height="16" class="s"/><defs><clipPath id="${u}c"><circle cx="100" cy="32" r="21"/></clipPath></defs><circle cx="100" cy="32" r="21" class="s"/><image href="${opt.bild}" x="79" y="11" width="42" height="42" clip-path="url(#${u}c)" preserveAspectRatio="xMidYMid slice"/><circle cx="100" cy="32" r="21" fill="none" class="rand"/>`;
+    const grad = `<defs><linearGradient id="${u}g" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient></defs>`;
     let stil = "";
     if (thema !== "app") {
       const d = thema === "dunkel";
-      stil = `<style>.s{fill:${d ? "#2c2c2e" : "#e3e3e8"};stroke:${d ? "#48484a" : "#c8c8ce"};stroke-width:1.5}.rand{stroke:${d ? "#48484a" : "#c8c8ce"};stroke-width:1.5}.mu{fill:${d ? "#3a3a3c" : "#cfcfd4"};opacity:.7}.m1{fill:#ffcc00;opacity:.9}.m2{fill:#ff9f0a;opacity:1}.m3{fill:#ff3b30;opacity:1}</style>`;
+      stil = `<style>#${u} .s{fill:${d ? "#2c2c2e" : "#e3e3e8"};stroke:${d ? "#48484a" : "#c8c8ce"};stroke-width:1.5}#${u} .rand{stroke:${d ? "#48484a" : "#c8c8ce"};stroke-width:1.5}#${u} .mu{fill:${d ? "#3a3a3c" : "#d2d2d8"}}#${u} .m1{fill:#ffcc00}#${u} .m2{fill:#ff9f0a}#${u} .m3{fill:#ff3b30}</style>`;
     }
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 370" width="${breite}" height="${Math.round(breite * 1.85)}" class="mk-fig-${seite}">${stil}${sil}${kopf}<g>${m}</g></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" id="${u}" viewBox="0 0 200 370" width="${breite}" height="${Math.round(breite * 1.85)}" class="mk-fig-${seite}">${stil}${grad}${mirror(SIL, "s")}${kopf}<g>${m}</g><path d="${SIL}" fill="url(#${u}g)" pointer-events="none"/></svg>`;
   }
   function figurBild(seite, stufen, thema, bild) {
     return new Promise((ok) => {
