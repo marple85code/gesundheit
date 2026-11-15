@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.1.9";
+const APP_VERSION = "2.2.0";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1805,7 +1805,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.1.9): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.2.0): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -2092,13 +2092,14 @@ function sportMenue(a) {
   document.body.append(dlg); dlg.showModal();
 }
 /** Kleines Menü (Duplizieren, Entfernen) nach langem Drücken */
-function aktionsMenue(titel, duplizieren, entfernen) {
+function aktionsMenue(titel, duplizieren, entfernen, kopieren) {
   const dlg = h("dialog", { class: "blatt-dialog e-dialog", "aria-label": titel });
   const inhalt = h("div", { class: "dialog-inhalt" });
   const zu = () => dlg.close();
   const kopf = () => h("div", { class: "dialog-kopf" }, h("h2", null, titel), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: zu }, icon("zu", 20)));
   const start = () => inhalt.replaceChildren(kopf(), h("div", { class: "knopf-zeile" },
     h("button", { class: "knopf", type: "button", onclick: () => { zu(); duplizieren(); } }, "Duplizieren"),
+    kopieren ? h("button", { class: "knopf zweit", type: "button", onclick: () => { zu(); kopieren(); } }, "Kopieren") : null,
     h("button", { class: "knopf zweit", type: "button", style: { color: "#ff3b30" }, onclick: fragen }, "Entfernen")));
   const fragen = () => inhalt.replaceChildren(kopf(), h("p", { class: "e-klein" }, "Wirklich entfernen? Das gilt auch auf deinen anderen Geräten."),
     h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", style: { background: "#ff3b30" }, onclick: () => { zu(); entfernen(); } }, "Entfernen"),
@@ -5298,11 +5299,22 @@ function eTagBauen(box, tag) {
           const l2 = eTagEintraege(tag), i = l2.findIndex((x) => x.id === e.id);
           l2.splice(i >= 0 ? i + 1 : l2.length, 0, { ...JSON.parse(JSON.stringify(e)), id: eNeueId() });
           eTagSchreiben(tag, l2); eTagBauen(box, tag);
-        }, () => { eTagSchreiben(tag, eTagEintraege(tag).filter((x) => x.id !== e.id)); eTagBauen(box, tag); }));
+        }, () => { eTagSchreiben(tag, eTagEintraege(tag).filter((x) => x.id !== e.id)); eTagBauen(box, tag); },
+        () => { E_STAND.zwischen = { ...JSON.parse(JSON.stringify(e)), mahl: e.mahl || "s" }; eTagBauen(box, tag); }));
         return h("li", null, knopf);
       })) : null);
   });
-  box.replaceChildren(uebersicht, ...mahlzeiten);
+  let ablage = null;
+  if (E_STAND.zwischen) {
+    const z = E_STAND.zwischen, wahl = h("select", { "aria-label": "Mahlzeit" }, E_MAHL.map(([id, name]) => h("option", { value: id, selected: id === z.mahl }, name)));
+    ablage = h("section", { class: "abschnitt e-mahl" }, h("div", { class: "e-mahl-kopf" }, h("h2", null, "Kopiert"), h("span", null, `${z.name} · ${zahl(z.g)} g`)),
+      h("div", { class: "knopf-zeile" }, wahl,
+        h("button", { type: "button", class: "knopf", onclick: () => {
+          const l2 = eTagEintraege(tag); l2.push({ ...JSON.parse(JSON.stringify(z)), id: eNeueId(), mahl: wahl.value });
+          eTagSchreiben(tag, l2); eTagBauen(box, tag); } }, "Hier einfügen"),
+        h("button", { type: "button", class: "knopf zweit", onclick: () => { E_STAND.zwischen = null; eTagBauen(box, tag); } }, "Verwerfen")));
+  }
+  box.replaceChildren(uebersicht, ...(ablage ? [ablage] : []), ...mahlzeiten);
 }
 
 async function ansichtEssen() {
@@ -5320,7 +5332,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.1.9): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.2.0): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5759,7 +5771,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.1.9)
+  // Immer auf der Startseite starten (neu in 2.2.0)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
