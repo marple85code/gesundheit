@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.1.0";
+const APP_VERSION = "2.1.1";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1778,7 +1778,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.1.0): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.1.1): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -2014,8 +2014,7 @@ function sportAenderungen(liste) {
 }
 function sportAendern(id, aenderung) {
   const m = sportAendLesen();
-  m[id] = { ...(m[id] || {}), ...aenderung };
-  if (!m[id].x && !m[id].n) delete m[id];
+  m[id] = { ...(m[id] || {}), ...aenderung, t: Date.now() }; // Eintrag bleibt (auch ohne Änderung) mit Zeitstempel erhalten, damit andere Geräte ihn übernehmen
   speicher.set(S_AEND, JSON.stringify(m));
   speicher.set(S_AENDZ, String(Date.now()));
   E_ABG.runden = 0; eAbgleichPlanen(3000);
@@ -2078,9 +2077,16 @@ async function sportAbgleichen(z) {
   const pfad = "d/ernaehrung/sport.enc";
   const c = await eCloudLesen(pfad);
   if (c.fehler) return { fehler: true };
-  const lz = Number(speicher.get(S_AENDZ)) || 0, cz = (c.daten && c.daten.z) || 0;
-  if (cz > lz) { speicher.set(S_AEND, JSON.stringify(c.daten.aend || {})); speicher.set(S_AENDZ, String(cz)); return { neu: true }; }
-  if (lz > cz) { await ePush(z, pfad, { z: lz, aend: sportAendLesen() }); return { hoch: true }; }
+  // Pro Aktivität gewinnt die neuere Änderung; Löschungen verschiedener Geräte gehen nie verloren
+  const lokal = sportAendLesen(), cloud = (c.daten && c.daten.aend) || {}, merged = { ...cloud };
+  let neu = false, hoch = false;
+  for (const id of new Set([...Object.keys(lokal), ...Object.keys(cloud)])) {
+    const l = lokal[id], cl = cloud[id], lt = l ? l.t || 1 : 0, ct = cl ? cl.t || 1 : 0;
+    if (ct > lt) { lokal[id] = cl; neu = true; } else if (lt > ct) { merged[id] = l; hoch = true; }
+  }
+  if (neu) { speicher.set(S_AEND, JSON.stringify(lokal)); speicher.set(S_AENDZ, String(Date.now())); }
+  if (hoch) { await ePush(z, pfad, { z: Date.now(), aend: merged }); return { neu, hoch: true }; }
+  if (neu) return { neu: true };
   return {};
 }
 
@@ -4396,7 +4402,10 @@ async function einstAbgleichen(z) {
   let neu = false, hoch = false;
   for (const k of schluessel) {
     if (!einstSync(k)) continue;
-    const lv = speicher.get(k), lt = zeiten[k] || (lv != null ? 1 : 0), ct = cloud[k] ? cloud[k][1] || 0 : 0;
+    let lv = speicher.get(k), lt = zeiten[k] || (lv != null ? 1 : 0), ct = cloud[k] ? cloud[k][1] || 0 : 0;
+    if (k === "gesundheit.sport.doppelt" && cloud[k] && lv != null && cloud[k][0] !== lv) { // Entscheidungen beider Geräte zusammenführen
+      try { const u = JSON.stringify({ ...JSON.parse(cloud[k][0] || "{}"), ...JSON.parse(lv || "{}") }); speicher.fremd = true; try { speicher.set(k, u); } finally { speicher.fremd = false; } lv = u; lt = ct = Date.now(); zeiten[k] = lt; merged[k] = [u, lt]; hoch = true; continue; } catch { /* normal weiter */ }
+    }
     if (ct > lt) {
       speicher.fremd = true; try { speicher.set(k, cloud[k][0]); } finally { speicher.fremd = false; }
       zeiten[k] = ct; neu = true;
@@ -4519,7 +4528,7 @@ async function eAbgleichen() {
     const t = speicher.get(S.darstellung);
     if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); else document.documentElement.removeAttribute("data-theme");
     if (!document.querySelector("dialog[open]")) neuZeichnen();
-  } else if (sportNeu && /^#(sport|heute)?$/.test(location.hash)) neuZeichnen();
+  } else if (sportNeu && !document.querySelector("dialog[open]")) neuZeichnen();
   if (neu || stammNeu) document.dispatchEvent(new CustomEvent("gawi:ernaehrung", { detail: { stamm: stammNeu } }));
 }
 document.addEventListener("gawi:ernaehrung", (ev) => {
@@ -5252,7 +5261,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.1.0): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.1.1): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5683,7 +5692,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.1.0)
+  // Immer auf der Startseite starten (neu in 2.1.1)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
@@ -5704,6 +5713,7 @@ async function start() {
   Daten.profilAbholen().catch(() => {});
   eAbgleichPlanen(2500);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) eAbgleichPlanen(1000); });
+  setInterval(() => { if (!document.hidden && !document.querySelector("dialog[open]")) { E_ABG.runden = 0; eAbgleichPlanen(500); } }, 90000); // offene App holt Änderungen anderer Geräte regelmäßig
   // regelmäßig nach neuen Daten sehen
   setInterval(async () => {
     if (document.hidden) return;
