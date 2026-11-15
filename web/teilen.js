@@ -17,10 +17,15 @@
   }
   function logo(c, x, y, s) { c.save(); rundRechteck(c, x, y, s, s, s * 0.22); c.clip(); if (logoBild.complete && logoBild.naturalWidth) c.drawImage(logoBild, x, y, s, s); else { c.fillStyle = "#0a84ff"; c.fillRect(x, y, s, s); } c.restore(); }
   function text(c, t, x, y, groesse, opt = {}) {
+    if (opt.spur) { try { c.letterSpacing = `${opt.spur}px`; } catch { /* ältere Browser */ } }
+    if (opt.fit) { // zu breiten Text verkleinern statt überlappen lassen
+      c.font = `${opt.kursiv ? "italic " : ""}${opt.gewicht || 400} ${groesse}px ${opt.schrift || SCHRIFT}`; const b = c.measureText(t).width;
+      if (b > opt.fit) groesse = Math.max(12, Math.floor(groesse * opt.fit / b));
+    }
     c.font = `${opt.kursiv ? "italic " : ""}${opt.gewicht || 400} ${groesse}px ${opt.schrift || SCHRIFT}`;
+    if (opt.max && c.measureText(t).width > opt.max) { let n = t.length; while (n > 1 && c.measureText(t.slice(0, n).trimEnd() + "…").width > opt.max) n--; t = t.slice(0, n).trimEnd() + "…"; }
     c.fillStyle = opt.farbe || "#fff"; c.textAlign = opt.ausrichtung || "left"; c.textBaseline = opt.basis || "alphabetic";
     if (opt.schatten) { c.shadowColor = "rgba(0,0,0,.5)"; c.shadowBlur = opt.schatten; c.shadowOffsetY = 2; }
-    if (opt.spur) { try { c.letterSpacing = `${opt.spur}px`; } catch { /* ältere Browser */ } }
     c.fillText(t, x, y);
     c.shadowColor = "transparent"; c.shadowBlur = 0; c.shadowOffsetY = 0;
     try { c.letterSpacing = "0px"; } catch { /* ältere Browser */ }
@@ -110,48 +115,48 @@
       const route = d.track && H > 1600 ? projizieren(d.track, 60, 240, W - 120, yTitel - 300, 0.04) : null;
       if (route) linie(c, route, "#0a84ff", 11, { schatten: 14 });
       c.fillStyle = "#0a84ff"; c.fillRect(60, yTitel, W - 120, 6);
-      text(c, `${d.datum} · ${d.uhr} Uhr`, 60, yTitel + 70, 34, { schrift: SCHMAL, farbe: "rgba(255,255,255,.85)" });
-      text(c, d.titel, 60, yTitel + 150, 78, { schrift: SCHMAL, gewicht: 700 });
+      text(c, `${d.datum} · ${d.uhr} Uhr`, 60, yTitel + 70, 34, { schrift: SCHMAL, farbe: "rgba(255,255,255,.85)", max: W - 120 });
+      text(c, d.titel, 60, yTitel + 150, 78, { schrift: SCHMAL, gewicht: 700, max: W - 120 });
       werte.forEach((w, i) => { const x = 60 + (i % 2) * 500, y = yStart + Math.floor(i / 2) * (hoeheBlock / zeilen) + 90;
-        text(c, w.v, x, y, 100, { schrift: SCHMAL, gewicht: 700 }); text(c, w.l.toUpperCase(), x, y + 40, 27, { schrift: SCHMAL, farbe: "rgba(255,255,255,.72)", spur: 2 }); });
+        text(c, w.v, x, y, 100, { schrift: SCHMAL, gewicht: 700, fit: 450 }); text(c, w.l.toUpperCase(), x, y + 40, 27, { schrift: SCHMAL, farbe: "rgba(255,255,255,.72)", spur: 2, fit: 450 }); });
     },
     strava(c, W, H, d, bg) {
       hintergrund(c, W, H, bg); c.fillStyle = "rgba(0,0,0,.25)"; c.fillRect(0, 0, W, H);
       const routeH = H > 1600 ? 700 : H > 1000 ? 330 : 230, route = projizieren(d.track, 120, H > 1600 ? 200 : 100, W - 240, routeH, 0.05);
       if (route) linie(c, route, "#fc4c02", 11, { schatten: 18, punkte: false });
-      const werte = werteListe(d, "distanz", "auf", "zeit", "tempo").slice(0, route ? 4 : 4), abstand = H > 1600 ? 150 : H > 1000 ? 128 : 98;
+      const werte = werteListe(d, "distanz", "auf", "zeit", "tempo").slice(0, route ? 4 : 4), abstand = H > 1600 ? 150 : H > 1000 ? 128 : 106;
       let y = (route ? (H > 1600 ? 1010 : H > 1000 ? 500 : 400) : H * 0.35);
       werte.forEach((w) => { text(c, w.l, W / 2, y, 32, { ausrichtung: "center", farbe: "rgba(255,255,255,.92)", schatten: 12 }); text(c, w.v + (w.e ? " " + w.e : ""), W / 2, y + (H < 1000 ? 54 : 66), H < 1000 ? 60 : 76, { ausrichtung: "center", gewicht: 700, schrift: "Montserrat, " + SCHRIFT, schatten: 14 }); y += abstand; });
     },
     fitness(c, W, H, d) {
       c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
       c.fillStyle = "#1c1c1e"; c.beginPath(); c.arc(145, 185, 75, 0, Math.PI * 2); c.fill(); logo(c, 100, 140, 90);
-      text(c, d.titel, 250, 175, 58, { gewicht: 700 }); text(c, `${d.datum} · ${d.uhr}`, 250, 228, 34, { farbe: "#8e8e93" });
+      text(c, d.titel, 250, 175, 58, { gewicht: 700, max: W - 250 - 60 }); text(c, `${d.datum} · ${d.uhr}`, 250, 228, 34, { farbe: "#8e8e93", max: W - 310 });
       const farben = ["#ffd60a", "#30d5e8", "#ff375f", "#ff375f", "#a4ff3b", "#30d5e8"];
       const werte = werteListe(d, "zeit", "distanz", "kcal", "hf", "tempo", "auf").slice(0, 6), zeile = H > 1600 ? 200 : 160;
       werte.forEach((w, i) => { const x = 70 + (i % 2) * 500, y = 380 + Math.floor(i / 2) * zeile;
-        text(c, w.l, x, y, 33, { gewicht: 600 }); text(c, w.v, x, y + 80, 96, { gewicht: 600, farbe: farben[i % farben.length] });
-        if (w.e) text(c, w.e.toUpperCase(), x + breite(c, w.v, 96, { gewicht: 600 }) + 10, y + 80, 44, { gewicht: 600, farbe: farben[i % farben.length] }); });
+        text(c, w.l, x, y, 33, { gewicht: 600, fit: 450 }); c.font = `600 96px ${SCHRIFT}`; const vs = Math.min(96, Math.floor(96 * 340 / Math.max(1, c.measureText(w.v).width))); text(c, w.v, x, y + 80, vs, { gewicht: 600, farbe: farben[i % farben.length] });
+        if (w.e) text(c, w.e.toUpperCase(), x + breite(c, w.v, vs, { gewicht: 600 }) + 10, y + 80, Math.min(44, vs * 0.46), { gewicht: 600, farbe: farben[i % farben.length] }); });
       const yp = 380 + Math.ceil(werte.length / 2) * zeile + 20, hp = H - 180 - yp;
       if (d.track && hp > 260) { const r = projizieren(d.track, 70, yp, W - 140, hp - 60, 0.04); linie(c, r, "#a4ff3b", 9, { punkte: false }); }
       else if (hp > 150) profil(c, d, 70, yp, W - 140, hp - 20, "#30d5e8");
     },
     wahoo(c, W, H, d) {
       topo(c, W, H, "#101216", "#1c2128");
-      text(c, d.titel.toUpperCase(), 70, 150, 52, { schrift: SCHMAL, kursiv: true, gewicht: 700, farbe: "#e4002b", spur: 3 }); logo(c, W - 160, 90, 90);
+      text(c, d.titel.toUpperCase(), 70, 150, 52, { schrift: SCHMAL, kursiv: true, gewicht: 700, farbe: "#e4002b", spur: 3, max: W - 275 }); logo(c, W - 160, 90, 90);
       const hStat = H > 1600 ? 560 : 440, rh = H - hStat - 260;
       const r = projizieren(d.track, 60, 220, W - 120, rh, 0.08), farben = r && tempoFarben(d, r);
       if (r) { linie(c, r, "#ff3b30", 15, { farben, schatten: 14, schattenFarbe: "rgba(255,255,255,.18)" }); }
       if (farben) { const y = 220 + rh + 40; text(c, "langsam", 70, y + 12, 26, { farbe: "#9aa0a6" }); const g = c.createLinearGradient(220, 0, 500, 0); [0, 0.5, 1].forEach((p) => g.addColorStop(p, `hsl(${p * 130},90%,55%)`)); c.fillStyle = g; rundRechteck(c, 215, y - 6, 280, 14, 7); c.fill(); text(c, "schnell", 515, y + 12, 26, { farbe: "#9aa0a6" }); }
       const werte = werteListe(d, "distanz", "zeit", "tempo", "hf", "auf", "kcal").slice(0, 6), z = H > 1600 ? 200 : 160;
       werte.forEach((w, i) => { const x = 70 + (i % 3) * 330, y = H - hStat + 100 + Math.floor(i / 3) * z;
-        text(c, (w.l + (w.e ? " " + w.e : "")).toUpperCase(), x, y - 60, 25, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 }); text(c, w.v, x, y + 30, 90, { schrift: SCHMAL, kursiv: true, gewicht: 800 }); });
+        text(c, (w.l + (w.e ? " " + w.e : "")).toUpperCase(), x, y - 60, 25, { fit: 300, schrift: SCHMAL, farbe: "#9aa0a6", spur: 2 }); text(c, w.v, x, y + 30, 90, { fit: 300, schrift: SCHMAL, kursiv: true, gewicht: 800 }); });
     },
     woche(c, W, H, d, bg, glas) {
       if (glas) { hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 1, 0.15, 0.3); } else topoIos(c, W, H);
       const fa = [["#0a84ff"], ["#30d158"], ["#ff9f0a"], ["#5e5ce6"], ["#ff3b30"], ["#64d2ff"]];
-      text(c, d.datum.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: glas ? "rgba(255,255,255,.8)" : "#8e8e93", spur: 3 });
-      text(c, d.titel, 60, 215, 76, { schrift: SCHMAL, gewicht: 700 }); logo(c, W - 156, 70, 96);
+      text(c, d.datum.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: glas ? "rgba(255,255,255,.8)" : "#8e8e93", spur: 3, max: W - 230 });
+      text(c, d.titel, 60, 215, 76, { schrift: SCHMAL, gewicht: 700, max: W - 230 }); logo(c, W - 156, 70, 96);
       const ws = d.werte.slice(0, 6), top = 300, platz = H - top - 60, zh = Math.min(200, platz / Math.max(1, ws.length));
       c.fillStyle = glas ? "rgba(18,20,26,.66)" : "rgba(44,44,46,.92)"; rundRechteck(c, 20, top - 30, W - 40, zh * ws.length + 60, 48); c.fill();
       ws.forEach((w, i) => { const y = top + i * zh + zh * 0.62;
@@ -161,22 +166,22 @@
     },
     suunto(c, W, H, d) {
       topoIos(c, W, H);
-      text(c, `${d.datum}`.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: "#8e8e93", spur: 3 }); text(c, d.titel, 60, 205, 70, { schrift: SCHMAL, gewicht: 700, farbe: "#fff" }); logo(c, W - 156, 90, 96);
+      text(c, `${d.datum}`.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: "#8e8e93", spur: 3, max: W - 230 }); text(c, d.titel, 60, 205, 70, { schrift: SCHMAL, gewicht: 700, farbe: "#fff", max: W - 230 }); logo(c, W - 156, 90, 96);
       const hp = H > 1600 ? 640 : H > 1000 ? 520 : 330, r = projizieren(d.track, 60, 260, W - 120, H - hp - 300, 0.08); linie(c, r, "#ff3b30", 13, { punkte: true });
       c.fillStyle = "rgba(44,44,46,.92)"; rundRechteck(c, 20, H - hp, W - 40, hp - 20, 48); c.fill();
       if (hp > 400) profil(c, d, 0, H - hp + 40, W, hp - 330, "#0a84ff");
       const werte = [d.w.distanz, d.w.zeit, d.w.tempo, d.w.auf].filter(Boolean);
-      werte.forEach((w, i) => { const x = 60 + i * ((W - 120) / Math.max(1, werte.length)); text(c, w.v, x, H - 130, werte.length > 3 ? 84 : 96, { schrift: SCHMAL, gewicht: 700, farbe: ["#fff", "#30d158", "#0a84ff", "#ff9f0a"][i % 4] }); text(c, (w.e || w.l).toUpperCase(), x, H - 82, 27, { schrift: SCHMAL, farbe: "#8e8e93", spur: 2 }); });
+      werte.forEach((w, i) => { const x = 60 + i * ((W - 120) / Math.max(1, werte.length)); text(c, w.v, x, H - 130, werte.length > 3 ? 84 : 96, { fit: (W - 120) / Math.max(1, werte.length) - 14, schrift: SCHMAL, gewicht: 700, farbe: ["#fff", "#30d158", "#0a84ff", "#ff9f0a"][i % 4] }); text(c, (w.e || w.l).toUpperCase(), x, H - 82, 27, { fit: (W - 120) / Math.max(1, werte.length) - 14, schrift: SCHMAL, farbe: "#8e8e93", spur: 2 }); });
     },
     glas(c, W, H, d, bg) {
       hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 1, 0.15, 0.3);
       const hk = H > 1600 ? 720 : 560, y0 = H - hk - 60;
       c.fillStyle = "rgba(18,20,26,.66)"; rundRechteck(c, 40, y0, W - 80, hk, 48); c.fill();
       c.strokeStyle = "rgba(255,255,255,.18)"; c.lineWidth = 2; c.stroke();
-      text(c, `${d.datum} · ${d.typ}`, 90, y0 + 90, 30, { farbe: "rgba(255,255,255,.8)" }); text(c, d.titel, 90, y0 + 160, 56, { gewicht: 700 }); logo(c, W - 190, y0 + 50, 100);
+      text(c, `${d.datum} · ${d.typ}`, 90, y0 + 90, 30, { farbe: "rgba(255,255,255,.8)", max: W - 330 }); text(c, d.titel, 90, y0 + 160, 56, { gewicht: 700, max: W - 330 }); logo(c, W - 190, y0 + 50, 100);
       const r = projizieren(d.track, 80, y0 + 200, 300, hk - 260, 0.06); linie(c, r, "#fff", 8, { punkte: false });
       const werte = werteListe(d, "distanz", "zeit", "tempo", "hf").slice(0, 4), x0 = r ? 440 : 90;
-      werte.forEach((w, i) => { const x = x0 + (i % 2) * 300, y = y0 + 280 + Math.floor(i / 2) * 150; text(c, w.l, x, y, 26, { farbe: "rgba(255,255,255,.75)" }); text(c, w.v + (w.e ? " " + w.e : ""), x, y + 62, 50, { gewicht: 700 }); });
+      werte.forEach((w, i) => { const x = x0 + (i % 2) * 300, y = y0 + 280 + Math.floor(i / 2) * 150; text(c, w.l, x, y, 26, { farbe: "rgba(255,255,255,.75)", fit: 280 }); text(c, w.v + (w.e ? " " + w.e : ""), x, y + 62, 50, { gewicht: 700, fit: 280 }); });
     },
   };
 
@@ -185,7 +190,7 @@
     const g = c.createLinearGradient(0, 0, W * 0.4, H); if (hell) { g.addColorStop(0, "#fff"); g.addColorStop(1, "#f5f5f7"); } else { g.addColorStop(0, "#1c1c2e"); g.addColorStop(1, "#0b0b12"); }
     c.fillStyle = g; c.fillRect(0, 0, W, H);
     const P = 60, quer = H < 1000, bilder = hell ? m.bilder.hell : m.bilder.dunkel, maxN = 5, liste = m.akt.slice(0, maxN);
-    text(c, d.datum.toUpperCase(), P, quer ? 96 : 120, 30, { schrift: SCHMAL, farbe: sub, spur: 3 });
+    text(c, d.datum.toUpperCase(), P, quer ? 96 : 120, 30, { schrift: SCHMAL, farbe: sub, spur: 3, max: W - 250 });
     text(c, "Training heute", P, quer ? 170 : 205, quer ? 74 : 82, { schrift: SCHMAL, gewicht: 700, farbe: fg }); logo(c, W - 150, quer ? 44 : 70, quer ? 84 : 90);
     const totale = [[m.zeit, "Stunden"], [m.kcal, "kcal"], [String(m.einheiten), m.einheiten === 1 ? "Einheit" : "Einheiten"]];
     const mehr = m.akt.length > maxN ? `und ${m.akt.length - maxN} weitere Einheiten` : null;
@@ -199,8 +204,9 @@
       liste.forEach((a, i) => {
         const y = top + i * (kh + gap);
         c.fillStyle = kachel; rundRechteck(c, x0, y, bw, kh, 26); c.fill();
-        text(c, a.name, x0 + 24, y + (gross ? 44 : 36), gross ? 34 : 28, { gewicht: 700, farbe: fg });
-        text(c, a.wann.replace(" Uhr", ""), x0 + bw - 24, y + (gross ? 42 : 34), gross ? 24 : 21, { farbe: sub, ausrichtung: "right" });
+        const wq = a.wann.replace(" Uhr", ""); c.font = `400 ${gross ? 24 : 21}px ${SCHRIFT}`; const wb = c.measureText(wq).width;
+        text(c, a.name, x0 + 24, y + (gross ? 44 : 36), gross ? 34 : 28, { gewicht: 700, farbe: fg, max: bw - 48 - wb - 30 });
+        text(c, wq, x0 + bw - 24, y + (gross ? 42 : 34), gross ? 24 : 21, { farbe: sub, ausrichtung: "right" });
         const zeile = a.werte.map(([l, v]) => v).join("  ·  ");
         if (gross) a.werte.forEach(([l, v], j) => { const x = x0 + 24 + j * ((bw - 48) / 3); text(c, l, x, y + 80, 20, { farbe: sub }); text(c, v, x, y + 116, 32, { schrift: SCHMAL, gewicht: 700, farbe: fg }); });
         else text(c, zeile, x0 + 24, y + kh - 18, 26, { schrift: SCHMAL, gewicht: 600, farbe: fg });
@@ -217,7 +223,8 @@
     liste.forEach((a, i) => {
       const y = yKarten + i * (kh + gap);
       c.fillStyle = kachel; rundRechteck(c, 40, y, W - 80, kh, 40); c.fill();
-      text(c, a.name, 78, y + (big ? 56 : 48), big ? 40 : 36, { gewicht: 700, farbe: fg }); text(c, a.wann, W - 78, y + (big ? 54 : 46), big ? 28 : 26, { farbe: sub, ausrichtung: "right" });
+      c.font = `400 ${big ? 28 : 26}px ${SCHRIFT}`; const wb = c.measureText(a.wann).width;
+      text(c, a.name, 78, y + (big ? 56 : 48), big ? 40 : 36, { gewicht: 700, farbe: fg, max: W - 156 - wb - 44 }); text(c, a.wann, W - 78, y + (big ? 54 : 46), big ? 28 : 26, { farbe: sub, ausrichtung: "right" });
       a.werte.forEach(([l, v], j) => { const x = 78 + j * 320; text(c, l, x, y + (big ? 94 : 84), 24, { farbe: sub }); text(c, v, x, y + (big ? 138 : 124), big ? 42 : 38, { schrift: SCHMAL, gewicht: 700, farbe: fg }); });
     });
     if (mehr) text(c, mehr, W / 2, H - 28, 28, { farbe: sub, ausrichtung: "center" });
