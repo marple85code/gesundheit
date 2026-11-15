@@ -191,7 +191,12 @@
     c.fillStyle = g; c.fillRect(0, 0, W, H);
     const P = 60, quer = H < 1000, bilder = hell ? m.bilder.hell : m.bilder.dunkel, maxN = 5, liste = m.akt.slice(0, maxN);
     text(c, d.datum.toUpperCase(), P, quer ? 96 : 120, 30, { schrift: SCHMAL, farbe: sub, spur: 3, max: W - 250 });
-    text(c, "Training heute", P, quer ? 170 : 205, quer ? 74 : 82, { schrift: SCHMAL, gewicht: 700, farbe: fg }); logo(c, W - 150, quer ? 44 : 70, quer ? 84 : 90);
+    text(c, "Training heute", P, quer ? 170 : 205, quer ? 74 : 82, { schrift: SCHMAL, gewicht: 700, farbe: fg });
+    { // Sportart-Symbole hinter dem Titel
+      c.font = `700 ${quer ? 74 : 82}px ${SCHMAL}`; const tb = c.measureText("Training heute").width, sy = (m.symbole || []).slice(0, 6), x0 = P + tb + 24, frei = W - 150 - 20 - x0;
+      const sz = Math.max(40, Math.min(quer ? 62 : 70, (frei + 10) / Math.max(1, sy.length) - 10)), y0 = (quer ? 170 : 205) - sz + 6, n = Math.min(sy.length, Math.floor((frei + 10) / (sz + 10)));
+      for (let i = 0; i < n; i++) c.drawImage(sy[i], x0 + i * (sz + 10), y0, sz, sz);
+    } logo(c, W - 150, quer ? 44 : 70, quer ? 84 : 90);
     const totale = [[m.zeit, "Stunden"], ...(m.km ? [[m.km, "km"]] : []), [m.kcal, "kcal"], [String(m.einheiten), m.einheiten === 1 ? "Einheit" : "Einheiten"]];
     const mehr = m.akt.length > maxN ? `und ${m.akt.length - maxN} weitere Einheiten` : null;
     if (quer) {

@@ -994,6 +994,9 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .mk-block { background: var(--blatt); border: 1px solid var(--linie); border-radius: 22px; padding: 14px; margin: 0 0 14px; cursor: pointer; display: flex; flex-direction: column; min-width: 0; }
 .heute-oben .mk-block { margin: 0; }
 .mk-kopf { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mk-titelzeile { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.sport-marke { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; flex: none; }
+.sport-marke svg { stroke-width: 2; }
 .mk-titel { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: var(--tinte-2); }
 .mk-teilen { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 99px; background: #0a84ff; color: #fff; font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; cursor: pointer; }
 .mk-figuren { display: flex; justify-content: center; gap: 4px; flex: 1; align-items: center; }

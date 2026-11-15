@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.1.3";
+const APP_VERSION = "2.1.4";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -100,6 +100,15 @@ const ICON = {
   gehen: '<circle cx="13" cy="4.4" r="1.9"/><path d="m10.4 21 1.7-6.2 2.6 2.4V21M9.2 12.4 11 8.2l2.6.2 1.6 3.5 2 1M12 14.8l1.2-6.4"/>',
   yoga: '<circle cx="12" cy="5" r="2"/><path d="M4.5 18.5C7 17.5 9.5 17 12 17s5 .5 7.5 1.5M12 7.5v6M7 10.5l5 2 5-2"/>',
   sonst: '<path d="M2.5 12h4l2-5 3.5 10 2.5-7 1.5 2h5.5"/>',
+  rudern: '<path d="M3 17c3 2 5 2 9 0s6-2 9 0"/><path d="M4 13h11l3-3M18 10l3-3M6.5 13 5 9"/>',
+  ski: '<path d="M12 2v20M3.3 7l17.4 10M3.3 17 20.7 7M9.5 3.5 12 6l2.5-2.5M9.5 20.5 12 18l2.5 2.5"/>',
+  schlaeger: '<ellipse cx="9.5" cy="9.5" rx="5.5" ry="6.8" transform="rotate(-45 9.5 9.5)"/><path d="m14 14 6.5 6.5M6.5 6.5l6 6"/>',
+  golf: '<path d="M9 21V3l9 4-9 4M5 21h9"/>',
+  ball: '<circle cx="12" cy="12" r="9"/><path d="m12 8 3.8 2.8-1.4 4.5H9.6l-1.4-4.5zM12 3v5M20 9.5l-4.2 1.3M17 19l-2.6-3.7M7 19l2.6-3.7M4 9.5l4.2 1.3"/>',
+  klettern: '<path d="m3 20 7-13 4 7 2.5-4L21 20z"/><path d="M10 7V3l4 1.5-4 1.5"/>',
+  paddeln: '<path d="m5 19 14-14M15.5 4.5l4 4M4.5 15.5l4 4M2.5 21.5c1.5-1 2.5-1 4 0"/>',
+  eis: '<path d="M6 4v9a3 3 0 0 0 3 3h9v-3l-5-2V4z"/><path d="M4 20h16"/>',
+  kampf: '<path d="M7 11V7a4 4 0 0 1 8 0v1h2a3 3 0 0 1 3 3v3a6 6 0 0 1-6 6h-3a4 4 0 0 1-4-4z"/><path d="M8 17h8"/>',
   sync: '<path d="M19.4 9.2A7.6 7.6 0 0 0 5.3 7.6M4.6 14.8a7.6 7.6 0 0 0 14.1 1.6"/><path d="M5 3.6v4.3h4.3M19 20.4v-4.3h-4.3"/>',
   haken: '<path d="m5.5 12.5 4.2 4.2 8.8-9.4"/>',
   auswertung: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
@@ -564,14 +573,32 @@ const SPORT = {
   hiking: ["Wandern", "wandern"], mountaineering: ["Bergsteigen", "wandern"], snowshoeing_ws: ["Schneeschuh", "wandern"],
   strength_training: ["Krafttraining", "kraft"], indoor_cardio: ["Cardio", "kraft"], cardio_training: ["Cardio", "kraft"], hiit: ["HIIT", "kraft"],
   fitness_equipment: ["Fitnessgeräte", "kraft"], elliptical: ["Crosstrainer", "kraft"], stair_climbing: ["Treppensteigen", "kraft"],
-  indoor_rowing: ["Rudergerät", "kraft"], rowing: ["Rudern", "schwimmen"], yoga: ["Yoga", "yoga"], pilates: ["Pilates", "yoga"],
+  indoor_rowing: ["Rudergerät", "rudern"], rowing: ["Rudern", "rudern"], yoga: ["Yoga", "yoga"], pilates: ["Pilates", "yoga"],
   breathwork: ["Atemübung", "yoga"], meditation: ["Meditation", "yoga"], swimming: ["Schwimmen", "schwimmen"], lap_swimming: ["Bahnenschwimmen", "schwimmen"],
-  open_water_swimming: ["Freiwasserschwimmen", "schwimmen"], resort_skiing_snowboarding_ws: ["Ski & Snowboard", "wandern"],
-  backcountry_skiing: ["Skitour", "wandern"], cross_country_skiing_ws: ["Langlauf", "wandern"], multi_sport: ["Multisport", "sonst"],
-  tennis: ["Tennis", "sonst"], padel: ["Padel", "sonst"], golf: ["Golf", "sonst"], other: ["Sonstiges", "sonst"],
+  open_water_swimming: ["Freiwasserschwimmen", "schwimmen"], resort_skiing_snowboarding_ws: ["Ski & Snowboard", "ski"],
+  backcountry_skiing: ["Skitour", "ski"], cross_country_skiing_ws: ["Langlauf", "ski"], skate_skiing_ws: ["Skating (Ski)", "ski"], resort_skiing: ["Skifahren", "ski"], snowboarding: ["Snowboard", "ski"], resort_snowboarding: ["Snowboard", "ski"], multi_sport: ["Multisport", "sonst"],
+  tennis: ["Tennis", "schlaeger"], tennis_v2: ["Tennis", "schlaeger"], padel: ["Padel", "schlaeger"], pickleball: ["Pickleball", "schlaeger"], badminton: ["Badminton", "schlaeger"], table_tennis: ["Tischtennis", "schlaeger"], squash: ["Squash", "schlaeger"], racquetball: ["Racquetball", "schlaeger"], golf: ["Golf", "golf"],
+  soccer: ["Fußball", "ball"], basketball: ["Basketball", "ball"], volleyball: ["Volleyball", "ball"], handball: ["Handball", "ball"], football: ["Football", "ball"], rugby: ["Rugby", "ball"], baseball: ["Baseball", "ball"], hockey: ["Hockey", "ball"], ice_hockey: ["Eishockey", "eis"], field_hockey: ["Feldhockey", "ball"],
+  rock_climbing: ["Klettern", "klettern"], bouldering: ["Bouldern", "klettern"], indoor_climbing: ["Klettern (drinnen)", "klettern"], mountaineering_climbing: ["Klettern", "klettern"],
+  kayaking_v2: ["Kajak", "paddeln"], kayaking: ["Kajak", "paddeln"], stand_up_paddleboarding_v2: ["Stand-up-Paddling", "paddeln"], stand_up_paddleboarding: ["Stand-up-Paddling", "paddeln"], paddling: ["Paddeln", "paddeln"], canoeing: ["Kanu", "paddeln"], whitewater_rafting_kayaking: ["Wildwasser", "paddeln"], sailing: ["Segeln", "paddeln"], windsurfing: ["Windsurfen", "paddeln"], kitesurfing: ["Kitesurfen", "paddeln"], surfing: ["Surfen", "paddeln"],
+  ice_skating: ["Eislaufen", "eis"], ice_skating_ws: ["Eislaufen", "eis"], inline_skating: ["Inline-Skaten", "eis"], skating: ["Skaten", "eis"],
+  boxing: ["Boxen", "kampf"], martial_arts: ["Kampfsport", "kampf"], mixed_martial_arts: ["MMA", "kampf"], kickboxing: ["Kickboxen", "kampf"], judo: ["Judo", "kampf"], karate: ["Karate", "kampf"], other: ["Sonstiges", "sonst"],
 };
 function sportName(typ) { return (SPORT[typ] || [String(typ || "Sonstiges").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())])[0]; }
-function sportIcon(typ) { return (SPORT[typ] || [0, "sonst"])[1]; }
+const SPORT_FARBE = { fahrrad: "#0a84ff", lauf: "#30d158", schwimmen: "#64d2ff", kraft: "#ff453a", wandern: "#ff9f0a", gehen: "#bf5af2", yoga: "#5e5ce6", rudern: "#14a3a8", ski: "#7d8cff", schlaeger: "#a6ad1c", golf: "#2e9e4f", ball: "#ff6b35", klettern: "#a2845e", paddeln: "#1fb5a8", eis: "#5a9bf0", kampf: "#e5384f", sonst: "#8e8e93" };
+const SPORT_RATE = [[/cycl|bik|ride|rad/, "fahrrad"], [/run|lauf/, "lauf"], [/swim|schwimm/, "schwimmen"], [/row/, "rudern"], [/ski|snowboard/, "ski"], [/tennis|padel|squash|badminton|racq|pickle/, "schlaeger"], [/golf/, "golf"], [/soccer|basket|volley|handball|football|rugby|baseball|hockey/, "ball"], [/climb|boulder/, "klettern"], [/kayak|paddl|canoe|sail|surf/, "paddeln"], [/skat/, "eis"], [/box|martial|judo|karate/, "kampf"], [/hik|mountain/, "wandern"], [/walk/, "gehen"], [/yoga|pilates|medit|breath/, "yoga"], [/strength|hiit|gym|fitness|cardio|elliptical|stair/, "kraft"]];
+function sportIcon(typ) {
+  if (SPORT[typ]) return SPORT[typ][1];
+  const t = String(typ || "").toLowerCase();
+  for (const [re, k] of SPORT_RATE) if (re.test(t)) return k;
+  return "sonst";
+}
+/** Runde Sportart-Marke: farbiger Kreis mit weißem Symbol */
+function sportMarke(k, groesse = 22) {
+  const sp = h("span", { class: "sport-marke", title: gruppenNamenSport[k] || "", style: { width: groesse + "px", height: groesse + "px", background: SPORT_FARBE[k] || SPORT_FARBE.sonst } }, icon(k, Math.round(groesse * 0.62)));
+  return sp;
+}
+const gruppenNamenSport = { lauf: "Laufen", fahrrad: "Radfahren", kraft: "Kraft & Fitness", wandern: "Wandern", gehen: "Gehen", schwimmen: "Schwimmen", yoga: "Yoga", rudern: "Rudern", ski: "Ski & Snowboard", schlaeger: "Schlägersport", golf: "Golf", ball: "Ballsport", klettern: "Klettern", paddeln: "Wassersport", eis: "Eis & Skaten", kampf: "Kampfsport", sonst: "Sonstiges" };
 function istLauf(typ) { return sportIcon(typ) === "lauf"; }
 
 // ---- Blutdruck-Einzelwerte nach den Grenzwerten für die Messung zu Hause (ESH 2023, Deutsche Hochdruckliga):
@@ -1778,7 +1805,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.1.3): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.1.4): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -1809,7 +1836,7 @@ async function muskelBlock(akt, heute) {
   const teilenKnopf = h("button", { type: "button", class: "mk-teilen", "aria-label": "Training teilen", onclick: (e) => { e.stopPropagation(); muskelTeilen(acts, res, sek, kcal, heute, bild); } }, icon("teilen", 16), "Teilen");
   const stat = (w, l) => h("div", null, h("b", null, w), h("span", null, l));
   const block = h("section", { class: "mk-block", tabindex: "0", role: "button", "aria-label": "Training heute, Details öffnen" },
-    h("div", { class: "mk-kopf" }, h("span", { class: "mk-titel" }, "Training heute"), teilenKnopf),
+    h("div", { class: "mk-kopf" }, h("span", { class: "mk-titelzeile" }, h("span", { class: "mk-titel" }, "Training heute"), ...[...new Set(acts.map((a) => sportIcon(a.typ)))].map((k) => sportMarke(k, 22))), teilenKnopf),
     figuren,
     h("div", { class: "mk-stat" }, stat(dauer(sek, false), "Std."), ...(kmGes(acts) ? [stat(kmGes(acts), "km")] : []), stat(kcal ? zahl(kcal) : "–", "kcal"), stat(String(acts.length), acts.length === 1 ? "Einheit" : "Einheiten")));
   const oeffnen = () => muskelDetails(acts, res, sek, kcal);
@@ -1838,15 +1865,23 @@ function muskelDetails(acts, res, sek, kcal) {
   dlg.addEventListener("close", () => dlg.remove()); dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
   document.body.append(dlg); dlg.showModal();
 }
+function sportMarkeBild(k, px = 96) {
+  return new Promise((ok) => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${px}" height="${px}"><circle cx="24" cy="24" r="24" fill="${SPORT_FARBE[k] || SPORT_FARBE.sonst}"/><g transform="translate(9.5 9.5) scale(1.2)" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[k] || ICON.sonst}</g></svg>`;
+    const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null);
+    i.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+}
 async function muskelTeilen(acts, res, sek, kcal, heute, bild) {
   const M = window.GaWiMuskeln;
+  const symbole = (await Promise.all([...new Set(acts.map((a) => sportIcon(a.typ)))].map((k) => sportMarkeBild(k)))).filter(Boolean);
   const [vD, hD, vH, hH] = await Promise.all([M.figurBild("v", res.stufen, "dunkel", bild), M.figurBild("h", res.stufen, "dunkel"), M.figurBild("v", res.stufen, "hell", bild), M.figurBild("h", res.stufen, "hell")]);
   teilenOeffnen({
     titel: "Training heute", datum: datum(heute, "langJahr"), datumIso: heute,
     muskel: {
       zeit: dauer(sek, false), km: kmGes(acts), kcal: kcal ? zahl(kcal) : "–", einheiten: acts.length,
       akt: acts.map((a) => ({ name: a.name || sportName(a.typ), wann: `${String(a.start).slice(11, 16)} Uhr · ${dauer(a.dauer, false)} Std.`, werte: muskelWerte(a) })),
-      bilder: { dunkel: [vD, hD], hell: [vH, hH] },
+      bilder: { dunkel: [vD, hD], hell: [vH, hH] }, symbole,
     },
   });
 }
@@ -2945,7 +2980,7 @@ async function ansichtSport() {
   if (kacheln.length) knoten.push(h("div", { class: "kacheln", style: { marginTop: "6px" } }, kacheln));
 
   // Aktivitätenliste mit eigenem Zeitraum
-  const gruppenNamen = { lauf: "Laufen", fahrrad: "Radfahren", kraft: "Kraft & Fitness", wandern: "Wandern & Berg", gehen: "Gehen", schwimmen: "Wasser", yoga: "Yoga & Atem", sonst: "Sonstiges" };
+  const gruppenNamen = gruppenNamenSport;
   const zrListe = [...ZEITRAEUME, ZR_ALLE];
   let zr = zrGewaehlt("aktivitaeten", "30", zrListe.map((x) => x[0]));
   const segBox = h("div", { class: "segmente zr", role: "group", "aria-label": "Zeitraum der Aktivitäten" });
@@ -5262,7 +5297,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.1.3): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.1.4): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5693,7 +5728,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.1.3)
+  // Immer auf der Startseite starten (neu in 2.1.4)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
