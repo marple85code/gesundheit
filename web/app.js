@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.1.6";
+const APP_VERSION = "2.1.7";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1805,7 +1805,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.1.6): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.1.7): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -1949,7 +1949,10 @@ async function ansichtHeute() {
   if (!E_STAND.ziel) { try { await eRechnerBauen((r) => { E_STAND.ziel = r; }); } catch { /* Ring zeigt dann „Ziel offen“ */ } }
   // Kachel „Heute im Überblick“ auf Wunsch entfernt
   {
+    const ftpG = ftpAusInfo(await Daten.info("garmin").catch(() => null));
     const ziele = eLesen(A_ZIELE, []);
+    if (ftpG && !ziele.some((q) => q.art === "ftp")) ziele.push({ art: "ftp", ist: ftpG, ziel: 0 });
+    for (const q of ziele) if (q.art === "ftp" && ftpG) q.ist = ftpG;
     const wsH = wocheStart(heute), minW = akt.filter((a_) => String(a_.start).slice(0, 10) >= wsH).reduce((x, a_) => x + (a_.dauer || 0) / 60, 0);
     const zeilenZ = ziele.map((z) => {
       let anteil = 0, text = "";
@@ -4577,6 +4580,20 @@ document.addEventListener("gawi:ernaehrung", (ev) => {
   if (location.hash.replace(/^#\/?/, "").split(/[/?]/)[0] !== "essen" || document.querySelector(".dialog-huelle, dialog[open]")) { if (E_ABG.aktualisieren) E_ABG.aktualisieren(); return; }
   if (ev.detail && ev.detail.stamm) neuZeichnen(); else if (E_ABG.aktualisieren) E_ABG.aktualisieren();
 });
+/** FTP Rad aus den Garmin-Leistungszonen (Sammler 1.3.2); null, wenn Garmin keinen Wert hat. */
+function ftpAusInfo(info) {
+  const roh = info && info.leistungszonen; if (!roh) return null;
+  const liste = Array.isArray(roh) ? roh : [roh]; let best = null;
+  for (const e of liste) {
+    if (!e || typeof e !== "object") continue;
+    const sport = String(e.sport || e.sportKey || "").toUpperCase();
+    const w = Number(e.functionalThresholdPower ?? e.ftp);
+    if (!(w > 0 && w < 700)) continue;
+    if (/CYCL|BIKE|RAD/.test(sport)) return w;
+    if (sport === "DEFAULT" || sport === "") best = best || w;
+  }
+  return best;
+}
 function eLesen(k, leer) { try { return JSON.parse(speicher.get(k) || "null") || leer; } catch { return leer; } }
 function eTagEintraege(iso) { return eLesen(E_TAGE, {})[iso] || []; }
 function eTagSchreiben(iso, liste) {
@@ -5303,7 +5320,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.1.6): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.1.7): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5529,6 +5546,9 @@ async function ansichtAuswertung() {
 
   // ---- Ziele
   const ziele = eLesen(A_ZIELE, []);
+  const ftpG = ftpAusInfo(await Daten.info("garmin").catch(() => null));
+  if (ftpG && !ziele.some((q) => q.art === "ftp")) ziele.push({ art: "ftp", ist: ftpG, ziel: 0, auto: true });
+  for (const q of ziele) if (q.art === "ftp" && ftpG) { q.ist = ftpG; q.auto = true; }
   const zBox = h("div");
   const istWert = (z) => z.art === "gewicht" ? (letzter(wReihe(w, 1)) || [])[1] : z.art === "sport" ? sumW(ws, naechste).min : null;
   const zZeigen = () => zBox.replaceChildren(...ziele.map((z, i) => { const ist = istWert(z); let anteil = 0, text = "";
@@ -5739,7 +5759,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.1.6)
+  // Immer auf der Startseite starten (neu in 2.1.7)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
