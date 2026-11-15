@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.2.1";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1805,7 +1805,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.2.0): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.2.1): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -4758,7 +4758,7 @@ function eZuletzt() {
     const k = `${e.name}|${e.marke || ""}`;
     if (gesehen.has(k)) continue;
     gesehen.add(k);
-    liste.push({ name: e.name, marke: e.marke || "", l: e.l, quelle: e.quelle || "", portion: e.portion || null });
+    liste.push({ name: e.name, marke: e.marke || "", l: e.l, quelle: e.quelle || "", portion: e.portion || null, letzteG: e.g || null });
     if (liste.length >= 25) return liste;
   }
   return liste;
@@ -4789,7 +4789,7 @@ function eDialog(optionen) {
     h("span", { class: "e-t-kcal" }, `${zahl(Math.round(lm.l[0]))} kcal`, h("small", null, " / 100 g")));
 
   function mengeAnsicht(lm, eintrag) {
-    let g = eintrag ? eintrag.g : (lm.portion ? lm.portion.g : 100);
+    let g = eintrag ? eintrag.g : (lm.letzteG || (lm.portion ? lm.portion.g : 100));
     const vorschau = h("div", { class: "e-vorschau" });
     const aktual = () => {
       const w = lm.l.map((v) => (v || 0) * (g || 0) / 100);
@@ -5332,7 +5332,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.2.0): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.2.1): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5771,7 +5771,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.2.0)
+  // Immer auf der Startseite starten (neu in 2.2.1)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
