@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 APP = "GesundheitsApp"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 STANDARD_ZEITZONE = "Europe/Berlin"
 UTC = timezone.utc
 
@@ -1775,13 +1775,15 @@ class GarminSammler:
         hat_daten = any(kompakt.get(k) for k in ("hf", "stress", "bb", "schritte", "schlaf"))
         if hat_daten:
             self.ablage.schreiben(f"d/tag/{d.isoformat()}.enc", kompakt)
-        self.z["tage"][d.isoformat()] = {"stand": int(time.time()), "final": d < self.heute(), "daten": hat_daten}
+        self.z["tage"][d.isoformat()] = {"stand": int(time.time()), "final": d < self.heute(), "daten": hat_daten, "schlaf": bool(kompakt.get("schlaf"))}
         self.neu["verlaeufe"] += 1
 
     def verlaeufe_aktuell(self) -> None:
         heute = self.heute()
         eintrag = self.z["tage"].get(heute.isoformat()) or {}
-        if time.time() - float(eintrag.get("stand", 0)) > 3 * STUNDE:
+        # Solange die Nacht von heute noch fehlt (Uhr noch nicht synchronisiert), jede halbe Stunde nachsehen, sonst alle 3 Stunden
+        warte = 0.5 * STUNDE if (not eintrag.get("schlaf") and datetime.now(self.zz).hour < 16) else 3 * STUNDE
+        if time.time() - float(eintrag.get("stand", 0)) > warte:
             self.verlauf(heute)
         gestern = heute - timedelta(days=1)
         e = self.z["tage"].get(gestern.isoformat()) or {}
