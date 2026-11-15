@@ -33,7 +33,7 @@ function t(s) {
 }
 
 let C, O, doc, y;
-const VERSION = "2.1.5";
+const VERSION = "2.1.6";
 
 // Diese Hilfen gibt die App seit Version 1.2.2 mit. Eine ältere App, die nach einem Update kurz
 // diesen neueren Berichtsteil lädt, kennt sie noch nicht – dann gelten diese gleichlautenden Fassungen.
@@ -762,6 +762,7 @@ async function aktivitaet(d) {
     const r = d.k[id]; if (!r.length) continue; const [a, z] = anfangEnde(r);
     zeilen.push([n, zahl(z[1], 1), r.length > 1 ? `${pm(z[1] - a[1], 1)} im Zeitraum (ml/kg/min)` : "ml/kg/min"]);
   }
+  try { const f = (JSON.parse(localStorage.getItem("gesundheit.auswertung.ziele") || "[]") || []).find((q) => q.art === "ftp"); if (f && f.ist) zeilen.push(["FTP Rad (eigene Angabe)", `${zahl(f.ist)} W`, ""]); } catch { /* ohne FTP */ }
   if (d.k.fitnessalter.length) zeilen.push(["Fitnessalter (Garmin)", `${zahl(C.letzter(d.k.fitnessalter)[1], 1)} Jahre`, ""]);
   if (zeilen.length) tabelle(["Kennzahl", "Mittelwert", "Bezug"], zeilen, { spalten: { 0: { cellWidth: 56 }, 1: { cellWidth: 30, halign: "right" } } });
   const halb = (BREITE - 6) / 2;

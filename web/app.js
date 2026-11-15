@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.1.5";
+const APP_VERSION = "2.1.6";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1805,7 +1805,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.1.5): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.1.6): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -1953,6 +1953,12 @@ async function ansichtHeute() {
     const wsH = wocheStart(heute), minW = akt.filter((a_) => String(a_.start).slice(0, 10) >= wsH).reduce((x, a_) => x + (a_.dauer || 0) / 60, 0);
     const zeilenZ = ziele.map((z) => {
       let anteil = 0, text = "";
+      if (z.art === "ftp") {
+        const kg = gLetzt ? gLetzt[1] : null, wkg = kg && z.ist ? ` ${zahl(z.ist / kg, 1)} W/kg` : "";
+        anteil = z.ziel ? z.ist / z.ziel : 0;
+        return h("div", { style: { margin: "6px 0" } }, h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: "13px" } }, h("span", null, "FTP Rad"), h("b", null, `${zahl(z.ist)} W`, wkg ? h("span", { style: { fontWeight: 400, opacity: 0.55, fontSize: "12px" } }, wkg) : null)),
+          z.ziel ? h("div", { class: "form-balken" }, h("i", { style: { width: `${Math.round(Math.max(0, Math.min(1, anteil)) * 100)}%`, background: anteil >= 1 ? "#34c759" : "#0a84ff" } })) : null);
+      }
       if (z.art === "gewicht") { const ist = gLetzt ? gLetzt[1] : null; anteil = ist != null && z.start !== z.ziel ? (z.start - ist) / (z.start - z.ziel) : 0; text = ist != null ? `${zahl(ist, 1)} / ${zahl(z.ziel, 1)} kg` : `Ziel ${zahl(z.ziel, 1)} kg`; }
       else { anteil = minW / z.ziel; text = `${zahl(Math.round(minW))} / ${zahl(z.ziel)} Min.`; }
       anteil = Math.max(0, Math.min(1, anteil));
@@ -5297,7 +5303,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.1.5): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.1.6): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5526,17 +5532,22 @@ async function ansichtAuswertung() {
   const zBox = h("div");
   const istWert = (z) => z.art === "gewicht" ? (letzter(wReihe(w, 1)) || [])[1] : z.art === "sport" ? sumW(ws, naechste).min : null;
   const zZeigen = () => zBox.replaceChildren(...ziele.map((z, i) => { const ist = istWert(z); let anteil = 0, text = "";
-    if (z.art === "gewicht") { const start = z.start; anteil = ist != null && start !== z.ziel ? (start - ist) / (start - z.ziel) : 0; text = `${zahl(ist, 1)} kg aktuell, Ziel ${zahl(z.ziel, 1)} kg`; }
+    if (z.art === "ftp") { const kg = (letzter(wReihe(w, 1)) || [])[1]; anteil = z.ziel ? z.ist / z.ziel : 0;
+      text = `${zahl(z.ist)} W aktuell${z.ziel ? `, Ziel ${zahl(z.ziel)} W` : ""}${kg ? ` (${zahl(z.ist / kg, 1)} W/kg)` : ""}`; }
+    else if (z.art === "gewicht") { const start = z.start; anteil = ist != null && start !== z.ziel ? (start - ist) / (start - z.ziel) : 0; text = `${zahl(ist, 1)} kg aktuell, Ziel ${zahl(z.ziel, 1)} kg`; }
     else { anteil = (ist || 0) / z.ziel; text = `${zahl(Math.round(ist || 0))} von ${zahl(z.ziel)} Min. diese Woche`; }
     anteil = Math.max(0, Math.min(1, anteil));
-    return h("div", { style: { padding: "6px 0" } }, h("b", null, z.art === "gewicht" ? `Gewicht auf ${zahl(z.ziel, 1)} kg` : `${zahl(z.ziel)} Min. Sport pro Woche`),
-      h("div", { class: "form-balken" }, h("i", { style: { width: `${Math.round(anteil * 100)}%`, background: "#34c759" } })), h("p", null, text),
+    return h("div", { style: { padding: "6px 0" } }, h("b", null, z.art === "ftp" ? (z.ziel ? `FTP Rad auf ${zahl(z.ziel)} W` : "FTP Rad") : z.art === "gewicht" ? `Gewicht auf ${zahl(z.ziel, 1)} kg` : `${zahl(z.ziel)} Min. Sport pro Woche`),
+      z.art === "ftp" && !z.ziel ? null : h("div", { class: "form-balken" }, h("i", { style: { width: `${Math.round(anteil * 100)}%`, background: "#34c759" } })), h("p", null, text),
       h("button", { type: "button", class: "knopf", onclick: () => { ziele.splice(i, 1); speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); } }, "Entfernen")); }));
   zZeigen();
   knoten.push(kart("Ziele", zBox, h("button", { type: "button", class: "knopf", onclick: () => formular("Ziel hinzufügen", [
-    { id: "art", label: "Was möchtest du erreichen?", optionen: [["gewicht", "Zielgewicht in kg"], ["sport", "Sport pro Woche in Minuten"]], wert: "gewicht" },
-    { id: "wert", label: "Zielwert", typ: "number", hilfe: "zum Beispiel 72 oder 150" }],
-    (v) => { const z = Number(String(v.wert).replace(",", ".")); if (!z) return; const st = (letzter(wReihe(w, 1)) || [])[1];
+    { id: "art", label: "Was möchtest du erreichen?", optionen: [["gewicht", "Zielgewicht in kg"], ["sport", "Sport pro Woche in Minuten"], ["ftp", "FTP Rad in Watt"]], wert: "gewicht" },
+    { id: "wert", label: "Zielwert (bei FTP optional)", typ: "number", hilfe: "zum Beispiel 72, 150 oder 300" },
+    { id: "ist", label: "Nur bei FTP: aktueller FTP in Watt", typ: "number", hilfe: "zum Beispiel 240" }],
+    (v) => { const z = Number(String(v.wert).replace(",", ".")); const ist = Number(String(v.ist).replace(",", "."));
+      if (v.art === "ftp") { if (!ist) return; const i = ziele.findIndex((q) => q.art === "ftp"); if (i >= 0) ziele.splice(i, 1); ziele.push({ art: "ftp", ist, ziel: z || 0, t: Date.now() }); speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); return; }
+      if (!z) return; const st = (letzter(wReihe(w, 1)) || [])[1];
       if (v.art === "gewicht") { if (!st) return; ziele.push({ art: "gewicht", ziel: z, start: st }); } else ziele.push({ art: "sport", ziel: z });
       speicher.set(A_ZIELE, JSON.stringify(ziele)); zZeigen(); }) }, "Ziel hinzufügen")));
 
@@ -5728,7 +5739,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.1.5)
+  // Immer auf der Startseite starten (neu in 2.1.6)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
