@@ -1788,6 +1788,7 @@ function muskelWerte(a) {
   if (!a.distanz && !a.saetze && a.dauer) w.push(["Dauer", dauer(a.dauer, false) + " h"]);
   return w.slice(0, 3);
 }
+function kmGes(acts) { const m = acts.reduce((x, a) => x + (a.distanz || 0), 0) / 1000; return m >= 0.05 ? zahl(m, m >= 100 ? 0 : 1) : ""; }
 async function muskelBlock(akt, heute) {
   if (!window.GaWiMuskeln) return null;
   const tag = akt.filter((a) => String(a.start || "").slice(0, 10) === heute && (a.dauer || 0) >= 60);
@@ -1810,7 +1811,7 @@ async function muskelBlock(akt, heute) {
   const block = h("section", { class: "mk-block", tabindex: "0", role: "button", "aria-label": "Training heute, Details öffnen" },
     h("div", { class: "mk-kopf" }, h("span", { class: "mk-titel" }, "Training heute"), teilenKnopf),
     figuren,
-    h("div", { class: "mk-stat" }, stat(dauer(sek, false), "Std."), stat(kcal ? zahl(kcal) : "–", "kcal"), stat(String(acts.length), acts.length === 1 ? "Einheit" : "Einheiten")));
+    h("div", { class: "mk-stat" }, stat(dauer(sek, false), "Std."), ...(kmGes(acts) ? [stat(kmGes(acts), "km")] : []), stat(kcal ? zahl(kcal) : "–", "kcal"), stat(String(acts.length), acts.length === 1 ? "Einheit" : "Einheiten")));
   const oeffnen = () => muskelDetails(acts, res, sek, kcal);
   block.addEventListener("click", oeffnen);
   block.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); oeffnen(); } });
@@ -1843,7 +1844,7 @@ async function muskelTeilen(acts, res, sek, kcal, heute, bild) {
   teilenOeffnen({
     titel: "Training heute", datum: datum(heute, "langJahr"), datumIso: heute,
     muskel: {
-      zeit: dauer(sek, false), kcal: kcal ? zahl(kcal) : "–", einheiten: acts.length,
+      zeit: dauer(sek, false), km: kmGes(acts), kcal: kcal ? zahl(kcal) : "–", einheiten: acts.length,
       akt: acts.map((a) => ({ name: a.name || sportName(a.typ), wann: `${String(a.start).slice(11, 16)} Uhr · ${dauer(a.dauer, false)} Std.`, werte: muskelWerte(a) })),
       bilder: { dunkel: [vD, hD], hell: [vH, hH] },
     },
