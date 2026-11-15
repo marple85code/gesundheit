@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.1.4";
+const APP_VERSION = "2.1.5";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1763,10 +1763,10 @@ function tagesformRechnen(k, heute) {
   if (teile.length < 2) return null;
   const sum = teile.reduce((a, t) => a + t.gewicht, 0);
   const wert = Math.round(teile.reduce((a, t) => a + t.wert * t.gewicht, 0) / sum);
-  const stufe = wert >= 80 ? ["sehr gut erholt", "#34c759", "Heute passen auch intensive Einheiten."]
-    : wert >= 65 ? ["gut erholt", "#34c759", "Heute passt ein lockerer bis zügiger Lauf."]
-    : wert >= 45 ? ["mittel", "#ff9f0a", "Eher locker bleiben und auf ausreichend Schlaf achten."]
-    : ["wenig erholt", "#ff3b30", "Heute lieber Ruhe oder nur leichte Bewegung."];
+  const stufe = wert >= 80 ? ["sehr gut erholt", "#34c759", "Heute passt auch ein forderndes Training."]
+    : wert >= 65 ? ["gut erholt", "#34c759", "Heute passt ein normales Training, locker bis zügig."]
+    : wert >= 45 ? ["mittel", "#ff9f0a", "Eher ein lockeres Training und auf ausreichend Schlaf achten."]
+    : ["wenig erholt", "#ff3b30", "Heute lieber Ruhe oder nur leichte Bewegung wie Spazieren oder Dehnen."];
   return { wert, teile, wort: stufe[0], farbe: stufe[1], rat: stufe[2] };
 }
 function auffaelligkeiten(k) {
@@ -1805,7 +1805,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.1.4): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.1.5): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -5297,7 +5297,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.1.4): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.1.5): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5728,7 +5728,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.1.4)
+  // Immer auf der Startseite starten (neu in 2.1.5)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
