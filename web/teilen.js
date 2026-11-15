@@ -1,7 +1,7 @@
 /* GaWi: Aktivität als Bild teilen (Story 1080x1920 und Feed 1080x1350), alles im Browser gezeichnet. */
 (() => {
   "use strict";
-  const GROESSEN = { story: [1080, 1920, "Story"], feed: [1080, 1350, "Feed"] };
+  const GROESSEN = { story: [1080, 1920, "Story"], feed: [1080, 1080, "Feed (Facebook)"] };
     const LAYOUTS = [["suunto", "iOS Kreise"], ["garmin", "Garmin"], ["strava", "Strava"], ["fitness", "Fitness"], ["wahoo", "Wahoo und Polar"], ["glas", "Glas"]];
   const HINTERGRUENDE = [
     ["sonne", "Sonnenaufgang", [[0, "#2b4a7a"], [0.45, "#e8886a"], [0.62, "#f7c27a"]], ["#3d5a4a", "#223a30"]],
@@ -117,11 +117,11 @@
     },
     strava(c, W, H, d, bg) {
       hintergrund(c, W, H, bg); c.fillStyle = "rgba(0,0,0,.25)"; c.fillRect(0, 0, W, H);
-      const routeH = H > 1600 ? 700 : 330, route = projizieren(d.track, 120, H > 1600 ? 200 : 100, W - 240, routeH, 0.05);
+      const routeH = H > 1600 ? 700 : H > 1000 ? 330 : 230, route = projizieren(d.track, 120, H > 1600 ? 200 : 100, W - 240, routeH, 0.05);
       if (route) linie(c, route, "#fc4c02", 11, { schatten: 18, punkte: false });
-      const werte = werteListe(d, "distanz", "auf", "zeit", "tempo").slice(0, route ? 4 : 4), abstand = H > 1600 ? 150 : 128;
-      let y = (route ? (H > 1600 ? 1010 : 500) : H * 0.35);
-      werte.forEach((w) => { text(c, w.l, W / 2, y, 32, { ausrichtung: "center", farbe: "rgba(255,255,255,.92)", schatten: 12 }); text(c, w.v + (w.e ? " " + w.e : ""), W / 2, y + 66, 76, { ausrichtung: "center", gewicht: 700, schrift: "Montserrat, " + SCHRIFT, schatten: 14 }); y += abstand; });
+      const werte = werteListe(d, "distanz", "auf", "zeit", "tempo").slice(0, route ? 4 : 4), abstand = H > 1600 ? 150 : H > 1000 ? 128 : 98;
+      let y = (route ? (H > 1600 ? 1010 : H > 1000 ? 500 : 400) : H * 0.35);
+      werte.forEach((w) => { text(c, w.l, W / 2, y, 32, { ausrichtung: "center", farbe: "rgba(255,255,255,.92)", schatten: 12 }); text(c, w.v + (w.e ? " " + w.e : ""), W / 2, y + (H < 1000 ? 54 : 66), H < 1000 ? 60 : 76, { ausrichtung: "center", gewicht: 700, schrift: "Montserrat, " + SCHRIFT, schatten: 14 }); y += abstand; });
     },
     fitness(c, W, H, d) {
       c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
@@ -162,9 +162,9 @@
     suunto(c, W, H, d) {
       topoIos(c, W, H);
       text(c, `${d.datum}`.toUpperCase(), 60, 130, 34, { schrift: SCHMAL, farbe: "#8e8e93", spur: 3 }); text(c, d.titel, 60, 205, 70, { schrift: SCHMAL, gewicht: 700, farbe: "#fff" }); logo(c, W - 156, 90, 96);
-      const hp = H > 1600 ? 640 : 520, r = projizieren(d.track, 60, 260, W - 120, H - hp - 300, 0.08); linie(c, r, "#ff3b30", 13, { punkte: true });
+      const hp = H > 1600 ? 640 : H > 1000 ? 520 : 330, r = projizieren(d.track, 60, 260, W - 120, H - hp - 300, 0.08); linie(c, r, "#ff3b30", 13, { punkte: true });
       c.fillStyle = "rgba(44,44,46,.92)"; rundRechteck(c, 20, H - hp, W - 40, hp - 20, 48); c.fill();
-      profil(c, d, 0, H - hp + 40, W, hp - 330, "#0a84ff");
+      if (hp > 400) profil(c, d, 0, H - hp + 40, W, hp - 330, "#0a84ff");
       const werte = [d.w.distanz, d.w.zeit, d.w.tempo, d.w.auf].filter(Boolean);
       werte.forEach((w, i) => { const x = 60 + i * ((W - 120) / Math.max(1, werte.length)); text(c, w.v, x, H - 130, werte.length > 3 ? 84 : 96, { schrift: SCHMAL, gewicht: 700, farbe: ["#fff", "#30d158", "#0a84ff", "#ff9f0a"][i % 4] }); text(c, (w.e || w.l).toUpperCase(), x, H - 82, 27, { schrift: SCHMAL, farbe: "#8e8e93", spur: 2 }); });
     },
@@ -184,25 +184,43 @@
     const m = d.muskel, fg = hell ? "#111" : "#fff", sub = hell ? "#6e6e73" : "#8e8e93", kachel = hell ? "#f2f2f7" : "rgba(255,255,255,.09)";
     const g = c.createLinearGradient(0, 0, W * 0.4, H); if (hell) { g.addColorStop(0, "#fff"); g.addColorStop(1, "#f5f5f7"); } else { g.addColorStop(0, "#1c1c2e"); g.addColorStop(1, "#0b0b12"); }
     c.fillStyle = g; c.fillRect(0, 0, W, H);
-    const P = 70;
-    text(c, d.datum.toUpperCase(), P, 120, 34, { schrift: SCHMAL, farbe: sub, spur: 3 });
-    text(c, "Training heute", P, 205, 82, { schrift: SCHMAL, gewicht: 700, farbe: fg }); logo(c, W - 160, 70, 90);
-    [[m.zeit, "Stunden"], [m.kcal, "kcal"], [String(m.einheiten), m.einheiten === 1 ? "Einheit" : "Einheiten"]].forEach(([v, l], i) => {
-      const x = P + i * 330; text(c, v, x, 330, 88, { schrift: SCHMAL, gewicht: 700, farbe: fg }); text(c, l, x, 372, 28, { farbe: sub });
-    });
-    const maxN = H > 1400 ? 4 : 2, liste = m.akt.slice(0, maxN), kh = 156, gap = 14;
-    const yKarten = H - 50 - liste.length * (kh + gap) + gap - (m.akt.length > maxN ? 40 : 0);
-    const y0 = 400, fh = Math.max(280, Math.min(640, yKarten - y0 - 30)), fw = fh / 1.85;
-    const bilder = (hell ? m.bilder.hell : m.bilder.dunkel);
-    const gesamt = 2 * fw + 50, x0 = (W - gesamt) / 2;
+    const P = 60, quer = H < 1000, bilder = hell ? m.bilder.hell : m.bilder.dunkel, maxN = 5, liste = m.akt.slice(0, maxN);
+    text(c, d.datum.toUpperCase(), P, quer ? 96 : 120, 30, { schrift: SCHMAL, farbe: sub, spur: 3 });
+    text(c, "Training heute", P, quer ? 170 : 205, quer ? 74 : 82, { schrift: SCHMAL, gewicht: 700, farbe: fg }); logo(c, W - 150, quer ? 44 : 70, quer ? 84 : 90);
+    const totale = [[m.zeit, "Stunden"], [m.kcal, "kcal"], [String(m.einheiten), m.einheiten === 1 ? "Einheit" : "Einheiten"]];
+    const mehr = m.akt.length > maxN ? `und ${m.akt.length - maxN} weitere Einheiten` : null;
+    if (quer) {
+      // Quadrat: links die Figuren und Gesamtwerte, rechts die Aktivitäten (3 bis 5 Stück, kompakt)
+      totale.forEach(([v, l], i) => { const x = P + i * 165; text(c, v, x, 262, 54, { schrift: SCHMAL, gewicht: 700, farbe: fg }); text(c, l, x, 292, 24, { farbe: sub }); });
+      const yo = 320, fh = Math.min(500, H - yo - 70), fw = fh / 1.85;
+      bilder.forEach((img, i) => { if (img) c.drawImage(img, P - 10 + i * (fw + 8), yo + 10, fw, fh); });
+      const x0 = 570, bw = W - x0 - 40, top = 220, hoch = H - top - 40 - (mehr ? 30 : 0), gap = 10, n = Math.max(1, liste.length), kh = Math.min(150, (hoch - gap * (n - 1)) / n);
+      const gross = kh >= 120;
+      liste.forEach((a, i) => {
+        const y = top + i * (kh + gap);
+        c.fillStyle = kachel; rundRechteck(c, x0, y, bw, kh, 26); c.fill();
+        text(c, a.name, x0 + 24, y + (gross ? 44 : 36), gross ? 34 : 28, { gewicht: 700, farbe: fg });
+        text(c, a.wann.replace(" Uhr", ""), x0 + bw - 24, y + (gross ? 42 : 34), gross ? 24 : 21, { farbe: sub, ausrichtung: "right" });
+        const zeile = a.werte.map(([l, v]) => v).join("  ·  ");
+        if (gross) a.werte.forEach(([l, v], j) => { const x = x0 + 24 + j * ((bw - 48) / 3); text(c, l, x, y + 80, 20, { farbe: sub }); text(c, v, x, y + 116, 32, { schrift: SCHMAL, gewicht: 700, farbe: fg }); });
+        else text(c, zeile, x0 + 24, y + kh - 18, 26, { schrift: SCHMAL, gewicht: 600, farbe: fg });
+      });
+      if (mehr) text(c, mehr, x0 + bw / 2, H - 22, 24, { farbe: sub, ausrichtung: "center" });
+      return;
+    }
+    totale.forEach(([v, l], i) => { const x = P + i * 330; text(c, v, x, 330, 88, { schrift: SCHMAL, gewicht: 700, farbe: fg }); text(c, l, x, 372, 28, { farbe: sub }); });
+    const gap = 14, n = Math.max(1, liste.length), kh = n > 3 ? 138 : 156, big = kh >= 150;
+    const yKarten = H - 50 - n * (kh + gap) + gap - (mehr ? 40 : 0);
+    const y0 = 400, fh = Math.max(250, Math.min(640, yKarten - y0 - 30)), fw = fh / 1.85;
+    const x0 = (W - (2 * fw + 50)) / 2;
     bilder.forEach((img, i) => { if (img) c.drawImage(img, x0 + i * (fw + 50), y0 + (yKarten - y0 - 30 - fh) / 2, fw, fh); });
     liste.forEach((a, i) => {
       const y = yKarten + i * (kh + gap);
       c.fillStyle = kachel; rundRechteck(c, 40, y, W - 80, kh, 40); c.fill();
-      text(c, a.name, 78, y + 56, 40, { gewicht: 700, farbe: fg }); text(c, a.wann, W - 78, y + 54, 28, { farbe: sub, ausrichtung: "right" });
-      a.werte.forEach(([l, v], j) => { const x = 78 + j * 320; text(c, l, x, y + 94, 24, { farbe: sub }); text(c, v, x, y + 138, 42, { schrift: SCHMAL, gewicht: 700, farbe: fg }); });
+      text(c, a.name, 78, y + (big ? 56 : 48), big ? 40 : 36, { gewicht: 700, farbe: fg }); text(c, a.wann, W - 78, y + (big ? 54 : 46), big ? 28 : 26, { farbe: sub, ausrichtung: "right" });
+      a.werte.forEach(([l, v], j) => { const x = 78 + j * 320; text(c, l, x, y + (big ? 94 : 84), 24, { farbe: sub }); text(c, v, x, y + (big ? 138 : 124), big ? 42 : 38, { schrift: SCHMAL, gewicht: 700, farbe: fg }); });
     });
-    if (m.akt.length > maxN) text(c, `und ${m.akt.length - maxN} weitere Einheiten`, W / 2, H - 28, 28, { farbe: sub, ausrichtung: "center" });
+    if (mehr) text(c, mehr, W / 2, H - 28, 28, { farbe: sub, ausrichtung: "center" });
   }
 
   function zeichnen(canvas, layout, groesse, daten, bg) {
