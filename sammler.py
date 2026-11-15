@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 APP = "GesundheitsApp"
-VERSION = "1.2.6"
+VERSION = "1.3.0"
 STANDARD_ZEITZONE = "Europe/Berlin"
 UTC = timezone.utc
 
@@ -1136,6 +1136,35 @@ SPORT_FELDER = {
 }
 
 
+KRAFT_TYPEN = ("strength_training", "hiit", "fitness_equipment")
+
+
+def uebungen_kompakt(antwort) -> list[dict]:
+    """Fasst die Uebungs-Saetze einer Krafttrainings-Aktivitaet je Uebung zusammen (Kategorie, Name, Saetze, Wiederholungen)."""
+    saetze = antwort.get("exerciseSets") if isinstance(antwort, dict) else None
+    if not isinstance(saetze, list):
+        return []
+    je: dict[tuple, dict] = {}
+    for s in saetze:
+        if not isinstance(s, dict) or str(s.get("setType") or "ACTIVE").upper() == "REST":
+            continue
+        ex = [e for e in (s.get("exercises") or []) if isinstance(e, dict)]
+        if not ex:
+            continue
+        ex.sort(key=lambda e: -(e.get("probability") or 0))
+        e = ex[0]
+        kat = str(e.get("category") or "").upper()
+        name = str(e.get("name") or "").upper()
+        if not kat and not name:
+            continue
+        z = je.setdefault((kat, name), {"kat": kat, "name": name, "saetze": 0, "wdh": 0})
+        z["saetze"] += 1
+        w = s.get("repetitionCount")
+        if zahl_ok(w):
+            z["wdh"] += int(w)
+    return list(je.values())
+
+
 def aktivitaet_kompakt(a: dict) -> dict:
     out = {}
     for kurz_name, feld in SPORT_FELDER.items():
@@ -1393,6 +1422,7 @@ class GarminSammler:
             self._schritt("Neue Aktivitäten", self.aktivitaeten_neu)
             self._schritt("Tagesverlauf", self.verlaeufe_aktuell)
             self._schritt("Aktivitätsdetails", lambda: self.details(10))
+            self._schritt("Übungen", self.uebungen_nachholen)
             self._schritt("EKG", self.ekg)
             self._schritt("Ältere Aktivitäten", self.aktivitaeten_alt)
             self._schritt("Historie", self.historie)
@@ -1589,7 +1619,7 @@ class GarminSammler:
                 neu += 1
             else:
                 # Was beim Laden der Details dazukam, bleibt erhalten (Details, GPS-Spur, Teilaktivitäten)
-                for feld in ("det", "gps", "kinder", "kinder_gesucht"):
+                for feld in ("det", "gps", "kinder", "kinder_gesucht", "ueb_geholt"):
                     if alt.get(feld) and not k.get(feld):
                         k[feld] = alt[feld]
             alle[schluessel] = k
@@ -1682,6 +1712,9 @@ class GarminSammler:
                 except NichtVerfuegbar:
                     pass
             kompakt = details_kompakt(det, runden_daten, zonen)
+            if a.get("typ") in KRAFT_TYPEN:
+                kompakt["ueb"] = self._uebungen_holen(aid) or []
+                a["ueb_geholt"] = True
             if not kompakt["track"]:
                 # Multisport: Spur aus den Teilaktivitäten zusammensetzen
                 for kind in self._kinder(a)[:8]:
@@ -1700,6 +1733,33 @@ class GarminSammler:
             if kompakt["track"]:
                 a["gps"] = True
             self.neu["details"] += 1
+
+    def _uebungen_holen(self, aid: str):
+        try:
+            return uebungen_kompakt(self.g.rufe("get_activity_exercise_sets", aid))
+        except NichtVerfuegbar:
+            return None
+
+    def uebungen_nachholen(self, reserve: int = 0) -> None:
+        """Krafttraining der letzten Tage, dessen Details schon vorliegen, bekommt nachtraeglich die Uebungen."""
+        grenze = (self.heute() - timedelta(days=7)).isoformat()
+        for a in sorted(self._aktivitaeten().values(), key=lambda x: str(x.get("start") or ""), reverse=True):
+            if str(a.get("start") or "")[:10] < grenze:
+                break
+            if a.get("typ") not in KRAFT_TYPEN or a.get("ueb_geholt") or not a.get("det"):
+                continue
+            if self.g.rest() <= reserve + 3:
+                return
+            aid = str(a["id"])
+            ueb = self._uebungen_holen(aid)
+            if ueb is None:
+                continue
+            datei = self.ablage.lesen(f"d/akt/{aid}.enc")
+            if isinstance(datei, dict):
+                datei["ueb"] = ueb
+                self.ablage.schreiben(f"d/akt/{aid}.enc", datei)
+                a["ueb_geholt"] = True
+                self.neu["details"] += 1
 
     # ---- Tagesverlaeufe -----------------------------------------------------
     def verlauf(self, d: date) -> None:
