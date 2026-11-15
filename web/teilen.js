@@ -165,7 +165,7 @@
         text(c, d.titel, 70, yStart - 40, 84, { schrift: SCHMAL, gewicht: 700, schatten: 12, max: W - 140 });
         ws.forEach((w, i) => { const x = 70 + (i % 2) * (W / 2 - 20), y = yStart + Math.floor(i / 2) * zh + 70;
           text(c, (w.l || "").toUpperCase(), x, y - 36, 24, { schrift: SCHMAL, farbe: "#c8ccd0", spur: 2, fit: W / 2 - 100 });
-          text(c, wert(w), x, y + 40, 78, { schrift: SCHMAL, gewicht: 700, fit: W / 2 - 100 }); });
+          text(c, wert(w), x, y + 40, 78, { schrift: SCHMAL, gewicht: 700, fit: W / 2 - 100 }); if (w.n) text(c, w.n, x + W / 2 - 100, y - 36, 24, { schrift: SCHMAL, farbe: "#c8ccd0", ausrichtung: "right", max: 200 }); });
         return;
       }
       if (stil === "strava") {
@@ -176,7 +176,7 @@
         ws.forEach((w, i) => { const y = top + i * zh;
           c.fillStyle = "rgba(255,255,255,.35)"; c.fillRect(70, y, W - 140, 2);
           text(c, (w.l || "").toUpperCase(), 70, y + zh * 0.3, 26, { farbe: "#fc4c02", gewicht: 700, spur: 2, max: W / 2 - 80 });
-          text(c, wert(w), 70, y + zh * 0.9, Math.min(88, zh * 0.42), { gewicht: 800, fit: W - 140 }); });
+          text(c, wert(w), 70, y + zh * 0.9, Math.min(88, zh * 0.42), { gewicht: 800, fit: w.n ? W - 480 : W - 140 }); if (w.n) text(c, w.n, W - 70, y + zh * 0.9, 30, { farbe: "#e0e0e0", ausrichtung: "right", max: 300 }); });
         return;
       }
       if (stil === "fitness") {
@@ -186,7 +186,7 @@
         const fc = ["#ffd60a", "#30d5e8", "#ff375f", "#a4ff3b", "#bf5af2", "#ff9f0a"], top = 330, zh = Math.min(200, (H - top - 40) / n);
         ws.forEach((w, i) => { const y = top + i * zh;
           text(c, (w.l || "").toUpperCase(), 70, y + zh * 0.26, 26, { farbe: "#8e8e93", spur: 2, max: W - 140 });
-          text(c, wert(w), 70, y + zh * 0.88, Math.min(90, zh * 0.42), { gewicht: 700, farbe: fc[i % 6], fit: W - 140 }); });
+          text(c, wert(w), 70, y + zh * 0.88, Math.min(90, zh * 0.42), { gewicht: 700, farbe: fc[i % 6], fit: w.n ? W - 480 : W - 140 }); if (w.n) text(c, w.n, W - 70, y + zh * 0.88, 30, { farbe: "#8e8e93", ausrichtung: "right", max: 300 }); });
         return;
       }
       if (stil === "wahoo") {
@@ -196,7 +196,7 @@
         const top = 300, zh = Math.min(200, (H - top - 40) / n);
         ws.forEach((w, i) => { const y = top + i * zh;
           text(c, (w.l || "").toUpperCase(), 70, y + zh * 0.26, 25, { schrift: SCHMAL, farbe: "#9aa0a6", spur: 2, max: W - 140 });
-          text(c, wert(w), 70, y + zh * 0.88, Math.min(96, zh * 0.42), { schrift: SCHMAL, kursiv: true, gewicht: 800, fit: W - 140 }); });
+          text(c, wert(w), 70, y + zh * 0.88, Math.min(96, zh * 0.42), { schrift: SCHMAL, kursiv: true, gewicht: 800, fit: w.n ? W - 480 : W - 140 }); if (w.n) text(c, w.n, W - 70, y + zh * 0.88, 30, { schrift: SCHMAL, farbe: "#9aa0a6", ausrichtung: "right", max: 300 }); });
         return;
       }
       if (glas) { hintergrund(c, W, H, bg); abdunkeln(c, W, H, 0, 1, 0.15, 0.3); } else topoIos(c, W, H);
