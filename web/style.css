@@ -978,3 +978,47 @@ dialog.e-dialog { max-height: 92vh; overflow: auto; width: min(560px, 100%); }
 .e-dialog .kamera.foto { aspect-ratio: 3 / 4; max-height: 68vh; margin-top: 8px; }
 .kamera.foto::after { display: none; }
 .kamera.foto video { object-fit: cover; }
+
+/* ---- Muskel-Block auf der Startseite (2.0.5) ---- */
+.heute-oben { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; margin: 0 0 14px; align-items: stretch; }
+.heute-oben .form-karte { margin: 0; padding: 14px; display: flex; flex-direction: column; justify-content: center; }
+.heute-oben .form-kopf { flex-direction: column-reverse; align-items: center; text-align: center; gap: 8px; }
+.heute-oben .form-kopf p { font-size: 12px; margin: 4px 0 0; }
+.heute-oben .form-ring { width: 84px; height: 84px; }
+.heute-oben .form-teile, .heute-oben .form-fuss { display: none; }
+@media (min-width: 900px) {
+  .heute-oben { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+  .heute-oben .form-teile, .heute-oben .form-fuss { display: block; }
+  .heute-oben .form-teile { display: grid; width: 100%; }
+}
+.mk-block { background: var(--blatt); border: 1px solid var(--linie); border-radius: 22px; padding: 14px; margin: 0 0 14px; cursor: pointer; display: flex; flex-direction: column; min-width: 0; }
+.heute-oben .mk-block { margin: 0; }
+.mk-kopf { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mk-titel { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; color: var(--tinte-2); }
+.mk-teilen { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 99px; background: #0a84ff; color: #fff; font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; cursor: pointer; }
+.mk-figuren { display: flex; justify-content: center; gap: 4px; flex: 1; align-items: center; }
+.mk-figuren svg { max-width: 46%; height: auto; }
+.mk-figuren .s { fill: var(--wash); stroke: var(--linie-stark, var(--linie)); stroke-width: 1.5; }
+.mk-figuren .rand { stroke: var(--linie); stroke-width: 1.5; }
+.mk-figuren .mu { fill: var(--wash); opacity: 1; transform-box: fill-box; transform-origin: center; }
+.mk-figuren .mu.m1, .mk-figuren .mu.m2, .mk-figuren .mu.m3 { opacity: 0; animation: mkAuf .7s ease-out forwards; }
+.mk-figuren .mu.m1 { fill: #ffcc00; } .mk-figuren .mu.m2 { fill: #ff9f0a; }
+.mk-figuren .mu.m3 { fill: #ff3b30; animation: mkAuf .7s ease-out forwards, mkPuls 2.6s ease-in-out 1.6s infinite; filter: drop-shadow(0 0 5px rgba(255, 59, 48, .7)); }
+@keyframes mkAuf { from { opacity: 0; transform: scale(.55); } to { opacity: 1; transform: scale(1); } }
+@keyframes mkPuls { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .72; transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .mk-figuren .mu.m1, .mk-figuren .mu.m2, .mk-figuren .mu.m3 { animation: none !important; opacity: 1; } }
+.mk-stat { display: flex; justify-content: space-between; gap: 6px; margin-top: 8px; text-align: center; }
+.mk-stat div { display: flex; flex-direction: column; min-width: 0; }
+.mk-stat b { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+.mk-stat span { font-size: 11px; color: var(--tinte-3); }
+@media (min-width: 900px) { .mk-figuren svg { max-width: 34%; } .mk-stat b { font-size: 24px; } }
+.mk-akt { background: var(--wash); border-radius: 14px; padding: 10px 12px; margin: 8px 0; }
+.mk-akt-kopf { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.mk-akt-kopf span { color: var(--tinte-3); font-size: 12px; }
+.mk-akt-werte { display: flex; gap: 14px; margin-top: 4px; }
+.mk-akt-werte div { display: flex; flex-direction: column; }
+.mk-akt-werte span { font-size: 11px; color: var(--tinte-3); }
+.mk-akt-werte b { font-size: 15px; }
+.mk-balken { display: grid; grid-template-columns: 140px 1fr; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+.mk-balken div { height: 8px; border-radius: 4px; background: var(--wash); }
+.mk-balken i { display: block; height: 100%; border-radius: 4px; }

@@ -180,21 +180,48 @@
     },
   };
 
+  function muskelKarte(c, W, H, d, hell) {
+    const m = d.muskel, fg = hell ? "#111" : "#fff", sub = hell ? "#6e6e73" : "#8e8e93", kachel = hell ? "#f2f2f7" : "rgba(255,255,255,.09)";
+    const g = c.createLinearGradient(0, 0, W * 0.4, H); if (hell) { g.addColorStop(0, "#fff"); g.addColorStop(1, "#f5f5f7"); } else { g.addColorStop(0, "#1c1c2e"); g.addColorStop(1, "#0b0b12"); }
+    c.fillStyle = g; c.fillRect(0, 0, W, H);
+    const P = 70;
+    text(c, d.datum.toUpperCase(), P, 120, 34, { schrift: SCHMAL, farbe: sub, spur: 3 });
+    text(c, "Training heute", P, 205, 82, { schrift: SCHMAL, gewicht: 700, farbe: fg }); logo(c, W - 160, 70, 90);
+    [[m.zeit, "Stunden"], [m.kcal, "kcal"], [String(m.einheiten), m.einheiten === 1 ? "Einheit" : "Einheiten"]].forEach(([v, l], i) => {
+      const x = P + i * 330; text(c, v, x, 330, 88, { schrift: SCHMAL, gewicht: 700, farbe: fg }); text(c, l, x, 372, 28, { farbe: sub });
+    });
+    const maxN = H > 1400 ? 4 : 2, liste = m.akt.slice(0, maxN), kh = 156, gap = 14;
+    const yKarten = H - 50 - liste.length * (kh + gap) + gap - (m.akt.length > maxN ? 40 : 0);
+    const y0 = 400, fh = Math.max(280, Math.min(640, yKarten - y0 - 30)), fw = fh / 1.85;
+    const bilder = (hell ? m.bilder.hell : m.bilder.dunkel);
+    const gesamt = 2 * fw + 50, x0 = (W - gesamt) / 2;
+    bilder.forEach((img, i) => { if (img) c.drawImage(img, x0 + i * (fw + 50), y0 + (yKarten - y0 - 30 - fh) / 2, fw, fh); });
+    liste.forEach((a, i) => {
+      const y = yKarten + i * (kh + gap);
+      c.fillStyle = kachel; rundRechteck(c, 40, y, W - 80, kh, 40); c.fill();
+      text(c, a.name, 78, y + 56, 40, { gewicht: 700, farbe: fg }); text(c, a.wann, W - 78, y + 54, 28, { farbe: sub, ausrichtung: "right" });
+      a.werte.forEach(([l, v], j) => { const x = 78 + j * 320; text(c, l, x, y + 94, 24, { farbe: sub }); text(c, v, x, y + 138, 42, { schrift: SCHMAL, gewicht: 700, farbe: fg }); });
+    });
+    if (m.akt.length > maxN) text(c, `und ${m.akt.length - maxN} weitere Einheiten`, W / 2, H - 28, 28, { farbe: sub, ausrichtung: "center" });
+  }
+
   function zeichnen(canvas, layout, groesse, daten, bg) {
     const [W, H] = GROESSEN[groesse]; canvas.width = W; canvas.height = H;
     const c = canvas.getContext("2d"); c.clearRect(0, 0, W, H);
     const F = 210, HI = H - F, tmp = document.createElement("canvas"); tmp.width = W; tmp.height = HI;
-    if (daten.werte) ZEICHNEN.woche(tmp.getContext("2d"), W, HI, daten, bg, layout === "glas"); else ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
+    if (daten.muskel) muskelKarte(tmp.getContext("2d"), W, HI, daten, layout === "mhell"); else if (daten.werte) ZEICHNEN.woche(tmp.getContext("2d"), W, HI, daten, bg, layout === "glas"); else ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
     c.drawImage(tmp, 0, 0);
-    const g = c.createLinearGradient(0, HI, 0, H); g.addColorStop(0, "#0b0b0f"); g.addColorStop(1, "#000"); c.fillStyle = g; c.fillRect(0, HI, W, F);
+    const hellFuss = layout === "mhell";
+    const g = c.createLinearGradient(0, HI, 0, H); g.addColorStop(0, hellFuss ? "#f5f5f7" : "#0b0b0f"); g.addColorStop(1, hellFuss ? "#fff" : "#000"); c.fillStyle = g; c.fillRect(0, HI, W, F);
     const s = 76, fy = HI + 26;
     logo(c, W / 2 - s / 2, fy, s);
-    text(c, "Geteilt mit GaWi by N.Setz", W / 2, fy + s + 48, 32, { ausrichtung: "center", gewicht: 600, farbe: "#fff" });
+    text(c, "Geteilt mit GaWi by N.Setz", W / 2, fy + s + 48, 32, { ausrichtung: "center", gewicht: 600, farbe: hellFuss ? "#111" : "#fff" });
   }
 
   function oeffnen(daten) {
     const bg = { id: "sonne", bild: null };
-    let layout = "suunto", groesse = "story";
+    const MLAYOUTS = [["mdunkel", "Dunkel"], ["mhell", "Weiß"]], LAY = daten.muskel ? MLAYOUTS : LAYOUTS;
+    let layout = daten.muskel ? "mdunkel" : "suunto", groesse = "story";
     const el = (tag, attr, ...kinder) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attr || {})) { if (k === "onclick") e.onclick = v; else if (k === "style") Object.assign(e.style, v); else if (v != null) e.setAttribute(k, v); } e.append(...kinder.flat().filter((x) => x != null)); return e; };
     const dlg = el("dialog", { class: "blatt-dialog teilen-dialog", "aria-label": "Aktivität teilen" });
     const gross = el("canvas", { class: "teilen-gross", "aria-label": "Vorschau" });
@@ -220,8 +247,8 @@
       gross.style.maxHeight = "52vh";
       inhalt.replaceChildren(kopf, el("div", { class: "teilen-vorschau" }, gross),
         el("div", { class: "teilen-reihe" }, el("b", null, "Größe"), gruppe(Object.entries(GROESSEN).map(([id, g]) => [id, `${g[2]} ${g[0]} x ${g[1]}`]), () => groesse, (v) => { groesse = v; })),
-        el("div", { class: "teilen-reihe" }, el("b", null, "Vorlage"), gruppe(LAYOUTS, () => layout, (v) => { layout = v; })),
-        el("div", { class: "teilen-reihe" }, el("b", null, "Hintergrund (Garmin, Strava, Glas)"), el("div", { class: "chips" },
+        el("div", { class: "teilen-reihe" }, el("b", null, "Vorlage"), gruppe(LAY, () => layout, (v) => { layout = v; })),
+        daten.muskel ? null : el("div", { class: "teilen-reihe" }, el("b", null, "Hintergrund (Garmin, Strava, Glas)"), el("div", { class: "chips" },
           ...HINTERGRUENDE.map(([id, name]) => el("button", { type: "button", "aria-pressed": String(!bg.bild && bg.id === id), onclick: () => { bg.id = id; bg.bild = null; neu(); } }, name)),
           el("button", { type: "button", "aria-pressed": String(!!bg.bild), onclick: () => datei.click() }, "Eigenes Foto …")), datei),
         el("div", { class: "knopf-zeile" }, el("button", { class: "knopf", type: "button", onclick: herunter }, "Herunterladen"), el("button", { class: "knopf zweit", type: "button", onclick: teilen }, "Teilen")), status);

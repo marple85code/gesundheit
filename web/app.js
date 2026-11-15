@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.0.4";
+const APP_VERSION = "2.0.5";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1777,6 +1777,78 @@ function tagesformKarte(k) {
   for (const a of auffaelligkeiten(k)) knoten.push(h("a", { class: "auffaellig", href: a.link }, h("span", null, "Auffällig"), h("b", null, a.titel), h("p", null, a.text)));
   return knoten;
 }
+
+// ---- Muskel-Block auf der Startseite (neu in 2.0.5): Training des Tages als animierte Figur, nur am selben Tag
+function muskelWerte(a) {
+  const w = [];
+  if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
+  if (a.saetze) w.push(["Sätze", zahl(a.saetze)]);
+  if (a.hf) w.push(["Ø Puls", zahl(a.hf)]);
+  if (a.kcal) w.push(["Kalorien", `${zahl(a.kcal)} kcal`]);
+  if (!a.distanz && !a.saetze && a.dauer) w.push(["Dauer", dauer(a.dauer, false) + " h"]);
+  return w.slice(0, 3);
+}
+async function muskelBlock(akt, heute) {
+  if (!window.GaWiMuskeln) return null;
+  const tag = akt.filter((a) => String(a.start || "").slice(0, 10) === heute && (a.dauer || 0) >= 60);
+  const kinder = new Set(tag.flatMap((a) => a.kinder || []).map(String));
+  const acts = tag.filter((a) => !kinder.has(String(a.id))).sort((a, b) => String(a.start).localeCompare(String(b.start)));
+  if (!acts.length) return null;
+  const ueb = new Map();
+  for (const a of acts) {
+    if (/strength|hiit|fitness_equipment/.test(a.typ || "") && a.det) {
+      try { const d = await Daten.datei(`d/akt/${a.id}.enc`); if (d && Array.isArray(d.ueb)) ueb.set(String(a.id), d.ueb); } catch { /* ohne Übungen */ }
+    }
+  }
+  const M = window.GaWiMuskeln, res = M.berechnen(acts, ueb);
+  const bild = speicher.get("gawi.profilbild") || null;
+  const sek = acts.reduce((x, a) => x + (a.dauer || 0), 0), kcal = acts.reduce((x, a) => x + (a.kcal || 0), 0);
+  const figuren = h("div", { class: "mk-figuren", "aria-hidden": "true" });
+  figuren.innerHTML = M.figur("v", res.stufen, 90, { bild }) + M.figur("h", res.stufen, 90);
+  const teilenKnopf = h("button", { type: "button", class: "mk-teilen", "aria-label": "Training teilen", onclick: (e) => { e.stopPropagation(); muskelTeilen(acts, res, sek, kcal, heute, bild); } }, icon("teilen", 16), "Teilen");
+  const stat = (w, l) => h("div", null, h("b", null, w), h("span", null, l));
+  const block = h("section", { class: "mk-block", tabindex: "0", role: "button", "aria-label": "Training heute, Details öffnen" },
+    h("div", { class: "mk-kopf" }, h("span", { class: "mk-titel" }, "Training heute"), teilenKnopf),
+    figuren,
+    h("div", { class: "mk-stat" }, stat(dauer(sek, false), "Std."), stat(kcal ? zahl(kcal) : "–", "kcal"), stat(String(acts.length), acts.length === 1 ? "Einheit" : "Einheiten")));
+  const oeffnen = () => muskelDetails(acts, res, sek, kcal);
+  block.addEventListener("click", oeffnen);
+  block.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); oeffnen(); } });
+  // Muskeln leuchten nacheinander auf, danach pulsieren die stark belasteten sanft
+  let i = 0;
+  figuren.querySelectorAll(".mu.m1, .mu.m2, .mu.m3").forEach((el) => { el.style.animationDelay = `${300 + (i++) * 110}ms`; });
+  return block;
+}
+function aktZeile(a) {
+  return h("div", { class: "mk-akt" }, h("div", { class: "mk-akt-kopf" }, h("b", null, a.name || sportName(a.typ)), h("span", null, `${String(a.start).slice(11, 16)} Uhr · ${dauer(a.dauer, false)} Std.`)),
+    h("div", { class: "mk-akt-werte" }, muskelWerte(a).map(([l, v]) => h("div", null, h("span", null, l), h("b", null, v)))));
+}
+function muskelDetails(acts, res, sek, kcal) {
+  const dlg = h("dialog", { class: "blatt-dialog", "aria-label": "Training heute" });
+  const balken = res.rang.slice(0, 6).map((r) => h("div", { class: "mk-balken" }, h("span", null, r.name), h("div", null, h("i", { style: { width: `${Math.round(Math.max(0.12, r.anteil) * 100)}%`, background: window.GaWiMuskeln.FARBE[r.stufe] } }))));
+  dlg.append(h("div", { class: "dialog-inhalt" },
+    h("div", { class: "dialog-kopf" }, h("h2", null, "Training heute"), h("button", { class: "dialog-zu", type: "button", "aria-label": "Schließen", onclick: () => dlg.close() }, icon("zu", 20))),
+    h("p", { class: "leise" }, `${dauer(sek, false)} Std. · ${kcal ? zahl(kcal) + " kcal · " : ""}${acts.length} ${acts.length === 1 ? "Einheit" : "Einheiten"}`),
+    ...acts.map(aktZeile),
+    res.rang.length ? h("h3", { style: { margin: "16px 0 6px", fontSize: "15px" } }, "Belastung der Muskelgruppen") : null, ...balken,
+    res.rang.length ? h("p", { class: "e-klein" }, "Gelb leicht, orange mittel, rot stark. Die Zuordnung ist eine Schätzung aus Sportart, Dauer und Übungen.") : null,
+    res.nichtZugeordnet.length ? h("p", { class: "e-klein" }, `Nicht zugeordnete Übungen: ${res.nichtZugeordnet.join(", ")}.`) : null,
+    h("p", { class: "e-klein" }, "Der Block verschwindet um 00:00 Uhr.")));
+  dlg.addEventListener("close", () => dlg.remove()); dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  document.body.append(dlg); dlg.showModal();
+}
+async function muskelTeilen(acts, res, sek, kcal, heute, bild) {
+  const M = window.GaWiMuskeln;
+  const [vD, hD, vH, hH] = await Promise.all([M.figurBild("v", res.stufen, "dunkel", bild), M.figurBild("h", res.stufen, "dunkel"), M.figurBild("v", res.stufen, "hell", bild), M.figurBild("h", res.stufen, "hell")]);
+  teilenOeffnen({
+    titel: "Training heute", datum: datum(heute, "langJahr"), datumIso: heute,
+    muskel: {
+      zeit: dauer(sek, false), kcal: kcal ? zahl(kcal) : "–", einheiten: acts.length,
+      akt: acts.map((a) => ({ name: a.name || sportName(a.typ), wann: `${String(a.start).slice(11, 16)} Uhr · ${dauer(a.dauer, false)} Std.`, werte: muskelWerte(a) })),
+      bilder: { dunkel: [vD, hD], hell: [vH, hH] },
+    },
+  });
+}
 async function ansichtHeute() {
   const heute = heuteIso();
   const von = isoMinus(100);
@@ -1827,7 +1899,14 @@ async function ansichtHeute() {
   }
   if (!brief.childNodes.length) brief.append("Für heute sind noch keine neuen Werte da. Sobald deine Uhr, die Waage oder das Blutdruckmessgerät synchronisiert haben, erscheinen sie hier.");
   knoten.push(brief);
-  try { knoten.push(...tagesformKarte(k)); } catch (e) { console.error(e); }
+  let tfKnoten = [];
+  try { tfKnoten = tagesformKarte(k); } catch (e) { console.error(e); }
+  let mkBlock = null;
+  try { mkBlock = await muskelBlock(akt, heute); } catch (e) { console.error(e); }
+  const formKarte = tfKnoten.find((n) => n && n.classList && n.classList.contains("form-karte"));
+  if (mkBlock && formKarte) { knoten.push(h("div", { class: "heute-oben" }, mkBlock, formKarte)); tfKnoten = tfKnoten.filter((n) => n !== formKarte); }
+  else if (mkBlock) knoten.push(mkBlock);
+  knoten.push(...tfKnoten);
 
   // ---- Kacheln
   const kacheln = [];
@@ -5107,7 +5186,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.0.4): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.0.5): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5538,8 +5617,23 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
+  // Immer auf der Startseite starten (neu in 2.0.5)
+  if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);
+  {
+    let versteckt = 0, tagStand = heuteIso();
+    const mitternacht = () => { const n = new Date(); n.setHours(24, 0, 5, 0); return n.getTime() - Date.now(); };
+    const neuerTag = () => { if (heuteIso() === tagStand) return; tagStand = heuteIso(); if (/^#?(heute)?$/.test(location.hash) && !document.querySelector("dialog[open]")) neuZeichnen(); };
+    const planen = () => setTimeout(() => { neuerTag(); planen(); }, mitternacht());
+    planen();
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) { versteckt = Date.now(); return; }
+      neuerTag();
+      if (versteckt && Date.now() - versteckt > 90000 && !document.querySelector("dialog[open]") && location.hash && location.hash !== "#heute") location.hash = "#heute";
+      versteckt = 0;
+    });
+  }
   Sync.fortsetzen();
   Daten.profilAbholen().catch(() => {});
   eAbgleichPlanen(2500);
