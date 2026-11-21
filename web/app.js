@@ -3,7 +3,7 @@
 (() => {
 "use strict";
 
-const APP_VERSION = "2.2.1";
+const APP_VERSION = "2.2.2";
 const SCHRIFT = '"Atkinson Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const S = { schluessel: "gesundheit.schluessel", zeitraum: "gesundheit.zeitraum", darstellung: "gesundheit.darstellung" };
 const BEWEGUNG = !matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -23,7 +23,7 @@ const speicher = {
 const EINST_Z = "gesundheit.einst.zeiten";
 function einstSync(k) {
   return typeof k === "string" && (k.startsWith("gesundheit.auswertung.") || k.startsWith("gesundheit.klapp.") || k === "gesundheit.zeitraum" || k === "gesundheit.darstellung"
-    || k === "gesundheit.region" || k === "gesundheit.karte" || k === "gesundheit.sport.doppelt");
+    || k === "gesundheit.region" || k === "gesundheit.karte" || k === "gesundheit.sport.doppelt" || k === "gesundheit.sport.symbole");
 }
 
 // Fehler der App auf diesem Gerät merken – für das Fehlerprotokoll (ohne Schlüssel und Zugangsdaten)
@@ -594,8 +594,10 @@ function sportIcon(typ) {
   return "sonst";
 }
 /** Runde Sportart-Marke: farbiger Kreis mit weißem Symbol */
+const SYMBOL_KEY = "gesundheit.sport.symbole";
+function symbolFuer(k) { try { const m = JSON.parse(speicher.get(SYMBOL_KEY) || "{}") || {}; return m[k] && ICON[m[k]] ? m[k] : k; } catch { return k; } }
 function sportMarke(k, groesse = 22) {
-  const sp = h("span", { class: "sport-marke", title: gruppenNamenSport[k] || "", style: { width: groesse + "px", height: groesse + "px", background: SPORT_FARBE[k] || SPORT_FARBE.sonst } }, icon(k, Math.round(groesse * 0.62)));
+  const sp = h("span", { class: "sport-marke", title: gruppenNamenSport[k] || "", style: { width: groesse + "px", height: groesse + "px", background: SPORT_FARBE[k] || SPORT_FARBE.sonst } }, icon(symbolFuer(k), Math.round(groesse * 0.62)));
   return sp;
 }
 const gruppenNamenSport = { lauf: "Laufen", fahrrad: "Radfahren", kraft: "Kraft & Fitness", wandern: "Wandern", gehen: "Gehen", schwimmen: "Schwimmen", yoga: "Yoga", rudern: "Rudern", ski: "Ski & Snowboard", schlaeger: "Schlägersport", golf: "Golf", ball: "Ballsport", klettern: "Klettern", paddeln: "Wassersport", eis: "Eis & Skaten", kampf: "Kampfsport", sonst: "Sonstiges" };
@@ -1805,7 +1807,7 @@ function tagesformKarte(k) {
   return knoten;
 }
 
-// ---- Muskel-Block auf der Startseite (neu in 2.2.1): Training des Tages als animierte Figur, nur am selben Tag
+// ---- Muskel-Block auf der Startseite (neu in 2.2.2): Training des Tages als animierte Figur, nur am selben Tag
 function muskelWerte(a) {
   const w = [];
   if (a.distanz) w.push(["Distanz", `${zahl(a.distanz / 1000, a.distanz >= 100000 ? 0 : 1)} km`]);
@@ -1867,7 +1869,7 @@ function muskelDetails(acts, res, sek, kcal) {
 }
 function sportMarkeBild(k, px = 96) {
   return new Promise((ok) => {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${px}" height="${px}"><circle cx="24" cy="24" r="24" fill="${SPORT_FARBE[k] || SPORT_FARBE.sonst}"/><g transform="translate(9.5 9.5) scale(1.2)" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[k] || ICON.sonst}</g></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="${px}" height="${px}"><circle cx="24" cy="24" r="24" fill="${SPORT_FARBE[k] || SPORT_FARBE.sonst}"/><g transform="translate(9.5 9.5) scale(1.2)" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[symbolFuer(k)] || ICON.sonst}</g></svg>`;
     const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null);
     i.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   });
@@ -1884,6 +1886,40 @@ async function muskelTeilen(acts, res, sek, kcal, heute, bild) {
       bilder: { dunkel: [vD, hD], hell: [vH, hH] }, symbole,
     },
   });
+}
+
+// Trainingszustand (Garmins neue Bezeichnungen) aus Status-Stichwort
+const ZUSTAND = {
+  PEAKING: ["Höchstform", "#5e5ce6", 1], PRODUCTIVE: ["Formaufbau", "#34c759", 0.8], MAINTAINING: ["Formerhalt", "#0a84ff", 0.6],
+  RECOVERY: ["Erholung", "#64d2ff", 0.45], DETRAINING: ["Formverlust", "#ff9f0a", 0.3], UNPRODUCTIVE: ["Unproduktiv", "#ffd60a", 0.25],
+  OVERREACHING: ["Überbelastung", "#ff3b30", 0.15], STRAINED: ["Überbelastung", "#ff3b30", 0.15],
+};
+function zustandInfo(t) { return ZUSTAND[String(t || "").replace(/_\d+$/, "").toUpperCase()] || null; }
+function phraseSuchen(o, tiefe = 0) {
+  if (!o || typeof o !== "object" || tiefe > 8) return null;
+  if (typeof o.trainingStatusFeedbackPhrase === "string") return o.trainingStatusFeedbackPhrase;
+  for (const k in o) { const r = phraseSuchen(o[k], tiefe + 1); if (r) return r; }
+  return null;
+}
+async function zustandKachel() {
+  const woche = await Daten.texte("g.trainingsstatus.trainingStatusFeedbackPhrase", isoMinus(35)).catch(() => []);
+  const info = await Daten.info("garmin").catch(() => null);
+  const jetzt = phraseSuchen(info && (info.tageszustand || info.trainingsstatus)) || (letzter(woche) || [])[1];
+  const z = zustandInfo(jetzt);
+  if (!z) return null;
+  const seit = (() => { let i = woche.length - 1, st = String(woche[i] ? woche[i][1] : "").replace(/_\d+$/, ""); while (i > 0 && String(woche[i - 1][1]).replace(/_\d+$/, "") === st) i--; return woche[i] ? woche[i][0] : null; })();
+  const U = 2 * Math.PI * 30;
+  const ring = s("svg", { viewBox: "0 0 76 76", width: 76, height: 76, "aria-hidden": "true" });
+  ring.append(s("circle", { cx: 38, cy: 38, r: 30, fill: "none", stroke: "rgba(120,120,128,.2)", "stroke-width": 8 }),
+    s("circle", { cx: 38, cy: 38, r: 30, fill: "none", stroke: z[1], "stroke-width": 8, "stroke-linecap": "round", "stroke-dasharray": `${U * z[2]} ${U}`, transform: "rotate(-90 38 38)" }),
+    s("path", { d: "M26 48 L35 38 L41 43 L52 30 M44 30 H52 V38", fill: "none", stroke: z[1], "stroke-width": 3, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+  const balken = h("div", { style: { display: "flex", gap: "3px", height: "10px", marginTop: "8px" } },
+    ...woche.slice(-5).map((p) => { const q = zustandInfo(p[1]); return h("i", { style: { flex: 1, borderRadius: "4px", background: q ? q[1] : "#c7c7cc" } }); }));
+  return kachel({ titel: "Trainingszustand", link: "#sport",
+    extra: h("div", null, h("div", { style: { display: "flex", gap: "12px", alignItems: "center" } }, ring,
+      h("div", null, h("div", { style: { fontSize: "20px", fontWeight: 700, color: z[1] } }, z[0]), h("div", { style: { fontSize: "12px", opacity: 0.6 } }, seit ? `seit ${datum(seit, "kurz")}` : ""))),
+      woche.length > 1 ? h("div", null, balken, h("div", { style: { fontSize: "11px", opacity: 0.55, marginTop: "3px" } }, "Letzte Wochen")) : null),
+    unter: "" });
 }
 async function ansichtHeute() {
   const heute = heuteIso();
@@ -1970,6 +2006,7 @@ async function ansichtHeute() {
     });
     kacheln.push(kachel({ titel: "Ziele", link: "#auswertung", extra: ziele.length ? h("div", null, ...zeilenZ) : null, unter: ziele.length ? "" : "Ziel festlegen" }));
   }
+  try { const zk = await zustandKachel(); if (zk) kacheln.push(zk); } catch (e) { console.error(e); }
   if (bp.length) {
     const woche = bp.filter((m) => m.ts >= Date.now() - 7 * 86400000);
     const mo = woche.filter((m) => istMorgens(m.ts)), ab = woche.filter((m) => !istMorgens(m.ts));
@@ -2984,7 +3021,7 @@ async function ansichtSport() {
   kz("vo2lauf", "VO₂max Laufen", 1, (l) => deltaText(l[1], vorTagen(k.vo2lauf, 90), 1, "", "in 90 Tagen"));
   kz("vo2rad", "VO₂max Radfahren", 1, (l) => deltaText(l[1], vorTagen(k.vo2rad, 90), 1, "", "in 90 Tagen"));
   kz("bereitschaft", "Trainingsbereitschaft", 0, () => (letzter(bereitText) ? textDeutsch(letzter(bereitText)[1]) : ""));
-  if (letzter(tsText)) kacheln.push(kachel({ titel: "Trainingsstatus", wert: textDeutsch(letzter(tsText)[1]), unter: `Stand ${datum(letzter(tsText)[0], "kurz")}`, befund: bf.trainingsstatus }));
+  if (letzter(tsText)) kacheln.push(kachel({ titel: "Trainingsstatus (klassisch)", wert: textDeutsch(letzter(tsText)[1]), unter: `Stand ${datum(letzter(tsText)[0], "kurz")}`, befund: bf.trainingsstatus }));
   kz("wochenlast", "Wochenlast", 0);
   kz("fitnessalter", "Fitnessalter", 1, (l) => deltaText(l[1], vorTagen(k.fitnessalter, 90), 1, "Jahre", "in 90 Tagen"), bf.fitnessalter);
   if (kacheln.length) knoten.push(h("div", { class: "kacheln", style: { marginTop: "6px" } }, kacheln));
@@ -3779,6 +3816,12 @@ async function ansichtStatus() {
         if (w_ === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", w_);
         neuZeichnen();
       } }, t)))),
+    abschnitt("Sport-Symbole", "Wähle für jede Sportart das Symbol im farbigen Kreis. Die Farbe bleibt, ein Tipp auf den Kreis mit Haken setzt das Standardsymbol zurück.",
+      h("div", null, Object.keys(SPORT_FARBE).filter((k) => gruppenNamenSport[k] || k === "sonst").map((k) => h("div", { style: { margin: "10px 0" } },
+        h("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" } }, sportMarke(k, 30), h("b", null, gruppenNamenSport[k] || "Sonstiges")),
+        h("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px" } }, Object.keys(SPORT_FARBE).filter((q) => ICON[q]).map((q) => h("button", { type: "button", "aria-pressed": String(symbolFuer(k) === q), "aria-label": gruppenNamenSport[q] || "Sonstiges",
+          style: { width: "38px", height: "38px", borderRadius: "19px", border: symbolFuer(k) === q ? `2px solid ${SPORT_FARBE[k]}` : "1px solid rgba(120,120,128,.3)", background: "transparent", color: "inherit", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 },
+          onclick: () => { let m = {}; try { m = JSON.parse(speicher.get(SYMBOL_KEY) || "{}") || {}; } catch { m = {}; } if (q === k) delete m[k]; else m[k] = q; speicher.set(SYMBOL_KEY, JSON.stringify(m)); neuZeichnen(); } }, icon(q, 20)))))))),
     abschnitt("Dieses Gerät", "Der Schlüssel liegt nur in diesem Browser. Ohne ihn sind die Daten nicht lesbar.", knopfEntfernen),
     abschnitt("Fehlerprotokoll speichern", "Alle Meldungen der Abrufe und Fehler der App als Textdatei – zum Beispiel, um sie bei Problemen zu verschicken. Schlüssel und Zugangsdaten stehen nicht darin.",
       protokollKnoepfe(),
@@ -4962,6 +5005,61 @@ function eDialog(optionen) {
       eingabe("packung", `Packungsgröße (${ml ? "ml" : "g"})`, ml ? "ml" : "g", z(p.packung)),
       meldung, h("div", { class: "knopf-zeile" }, h("button", { class: "knopf", type: "button", onclick: sichern }, "Speichern und weiter")));
   }
+  async function geminiSprache(key, satz) {
+    const eigen = (speicher.get("gawi.gemini.modell") || "").trim();
+    const modelle = eigen ? [eigen, ...GEM_MODELLE] : GEM_MODELLE;
+    const text = `Der Nutzer hat gesprochen, was er gegessen hat: "${satz}". Zerlege das in einzelne Lebensmittel mit Menge in Gramm (bei Millilitern ungefähr gleich Gramm). Rechne Stückangaben in Gramm um, zum Beispiel ein Ei etwa 60 g, eine Banane etwa 120 g, eine Scheibe Brot etwa 40 g. Nenne nur Lebensmittel, die im Satz vorkommen, mit kurzen deutschen Namen. Fehlt eine Menge, schätze eine übliche Portion.`;
+    let letzter = "";
+    for (const m of modelle) {
+      let r;
+      try {
+        r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, { method: "POST", signal: AbortSignal.timeout(40000), headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify({ contents: [{ parts: [{ text }] }], generationConfig: { responseMimeType: "application/json", temperature: 0.1, responseSchema: { type: "OBJECT", properties: { zutaten: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, gramm: { type: "NUMBER" } }, required: ["name", "gramm"] } } }, required: ["zutaten"] } } }) });
+      } catch { throw new Error("Keine Verbindung zu Google."); }
+      if (r.status === 400 || r.status === 401 || r.status === 403) { let t = ""; try { t = (await r.json()).error.message; } catch { /* leer */ } if (/key|API/i.test(t)) throw new Error("Der Google-Schlüssel wurde abgelehnt."); letzter = t; continue; }
+      if (r.status === 429 || r.status === 404 || r.status >= 500) { letzter = r.status === 429 ? "Das Tageslimit von Google ist erreicht." : "Das Modell ist gerade nicht verfügbar."; continue; }
+      if (!r.ok) { letzter = `Fehler ${r.status}`; continue; }
+      const j = await r.json();
+      const t = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts.map((p) => p.text || "").join("");
+      try { const o = JSON.parse(t); return (o.zutaten || []).filter((z) => z && z.name && Number(z.gramm) > 0); } catch { letzter = "Die Antwort war nicht lesbar."; }
+    }
+    throw new Error(letzter || "Die Erkennung hat nicht geklappt.");
+  }
+  async function sprachAnsicht() {
+    const zurueck = () => sucheAnsicht();
+    const meld = h("p", { class: "e-klein e-status" });
+    const feld = h("textarea", { class: "e-suche", rows: 4, placeholder: "z. B. 200 g Haferflocken, zwei Eier und eine Banane", "aria-label": "Was hast du gegessen?", style: { width: "100%" } });
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let rec = null;
+    const mikro = h("button", { class: "knopf zweit", type: "button" }, "Sprechen");
+    const stopp = () => { if (rec) { try { rec.stop(); } catch { /* schon beendet */ } rec = null; } mikro.textContent = "Sprechen"; };
+    mikro.onclick = () => {
+      if (rec) { stopp(); return; }
+      if (!SR) { meld.textContent = "Dieser Browser hat keine Spracherkennung. Nutze das Mikrofon der Tastatur oder tippe den Satz."; return; }
+      rec = new SR(); rec.lang = "de-DE"; rec.interimResults = true; rec.continuous = true;
+      const basis = feld.value ? feld.value.trim() + " " : "";
+      rec.onresult = (e) => { let t = ""; for (const r of e.results) t += r[0].transcript; feld.value = basis + t; };
+      rec.onerror = (e) => { meld.textContent = e.error === "not-allowed" ? "Das Mikrofon ist nicht erlaubt. Erlaube es in den Browser-Einstellungen." : "Die Spracherkennung hat nicht geklappt."; stopp(); };
+      rec.onend = () => stopp();
+      try { rec.start(); mikro.textContent = "Stopp"; meld.textContent = "Ich höre zu …"; } catch { stopp(); }
+    };
+    const erkennen = h("button", { class: "knopf", type: "button" }, "Lebensmittel erkennen");
+    erkennen.onclick = async () => {
+      stopp();
+      const satz = feld.value.trim();
+      if (!satz) { meld.textContent = "Sprich oder tippe zuerst, was du gegessen hast."; return; }
+      const key = speicher.get("gawi.gemini");
+      if (!key) { meld.textContent = "Dafür brauchst du den Google-Schlüssel. Du trägst ihn unter „Foto erkennen“ einmalig ein."; return; }
+      meld.textContent = "Wird ausgewertet …"; erkennen.disabled = true;
+      try {
+        const z = await geminiSprache(key, satz);
+        if (!z.length) { meld.textContent = "Es wurde kein Lebensmittel erkannt. Formuliere den Satz anders."; erkennen.disabled = false; return; }
+        meld.textContent = ""; await pruefen(z, null);
+      } catch (e) { erkennen.disabled = false; meld.textContent = `${e && e.message ? e.message : "Das hat nicht geklappt."} Du kannst weiterhin von Hand eintragen.`; }
+    };
+    inhalt.replaceChildren(kopf("Sprechen und erkennen", zurueck), h("p", { class: "e-klein" }, "Sag, was du gegessen hast, mit Mengen. Der Text wird zur Auswertung an Google gesendet. Du prüfst alles, bevor es gespeichert wird."), feld,
+      h("div", { class: "knopf-zeile" }, mikro, erkennen), meld);
+  }
   async function fotoAnsicht(modus) {
     const packung = modus === "packung";
     const titel = packung ? "Verpackung erkennen" : "Foto erkennen";
@@ -5088,7 +5186,7 @@ function eDialog(optionen) {
       const gewaehlt = zeilen.filter((r) => r.an && r.g > 0 && r.treffer[r.wahl]); if (!gewaehlt.length) return;
       if (gCb.checked) {
         if (!gName.value.trim()) { gName.focus(); return; }
-        let foto = null; try { foto = await bildVerkleinern(bild, 192, 0.8); } catch { /* ohne Foto */ }
+        let foto = null; try { if (bild) foto = await bildVerkleinern(bild, 192, 0.8); } catch { /* ohne Foto */ }
         const lg = eLesen(E_GERICHTE, []);
         lg.push({ id: eNeueId(), name: gName.value.trim(), foto, portionen: 1, zutaten: gewaehlt.map((r) => { const t = r.treffer[r.wahl]; return { name: t.name, marke: t.marke || "", quelle: t.quelle || "", l: t.l.map((v) => eRund(v || 0, 2)), g: eRund(r.g, 1) }; }) });
         speicher.set(E_GERICHTE, JSON.stringify(lg)); eGerichteGeaendert();
@@ -5097,7 +5195,7 @@ function eDialog(optionen) {
       for (const r of gewaehlt) { const t = r.treffer[r.wahl]; l.push({ id: eNeueId(), mahl, name: t.name, marke: t.marke || "", g: eRund(r.g, 1), l: t.l.map((v) => eRund(v || 0, 2)), quelle: t.quelle || "", portion: null }); }
       eTagSchreiben(optionen.tag, l); dlg.close(); optionen.fertig();
     } }, "Hinzufügen");
-    inhalt.replaceChildren(kopf("Erkannte Zutaten", () => fotoAnsicht()), h("img", { class: "e-foto gross", src: bild, alt: "", style: { width: "100%", maxHeight: "200px", objectFit: "cover", borderRadius: "12px" } }),
+    inhalt.replaceChildren(kopf("Erkannte Zutaten", () => (bild ? fotoAnsicht() : sprachAnsicht())), !bild ? null : h("img", { class: "e-foto gross", src: bild, alt: "", style: { width: "100%", maxHeight: "200px", objectFit: "cover", borderRadius: "12px" } }),
       h("p", { class: "e-klein" }, "Prüfe Mengen und Lebensmittel. Schätzungen aus Fotos sind oft zu niedrig, besonders bei Soßen und Öl."),
       h("div", { class: "e-zeile-oben" }, mahlAuswahl()), liste, mehr, summe, gBox, gName, h("div", { class: "knopf-zeile" }, ok));
     zeichneZeilen();
@@ -5234,7 +5332,7 @@ function eDialog(optionen) {
     inhalt.replaceChildren(kopf(zutatRueck ? "Zutat hinzufügen" : "Hinzufügen", zutatRueck ? () => { zutatRueck = null; gerichtEditor(); } : null),
       h("div", { class: "e-zeile-oben" }, mahlAuswahl()),
       feld, offKnopf,
-      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: () => fotoAnsicht() }, icon("kamera", 20), "Foto erkennen"), h("button", { class: "knopf zweit", type: "button", onclick: () => fotoAnsicht("packung") }, icon("kamera", 20), "Verpackung erkennen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen"),
+      h("div", { class: "knopf-zeile e-leiste-knoepfe" }, h("button", { class: "knopf", type: "button", onclick: () => scanAnsicht() }, icon("kamera", 20), "Barcode scannen"), h("button", { class: "knopf zweit", type: "button", onclick: () => fotoAnsicht() }, icon("kamera", 20), "Foto erkennen"), h("button", { class: "knopf zweit", type: "button", onclick: () => sprachAnsicht() }, "Sprechen"), h("button", { class: "knopf zweit", type: "button", onclick: () => fotoAnsicht("packung") }, icon("kamera", 20), "Verpackung erkennen"), h("button", { class: "knopf zweit", type: "button", onclick: eigenAnsicht }, "Eigenes Lebensmittel anlegen"),
         zutatRueck ? null : h("button", { class: "knopf zweit", type: "button", onclick: gerichteAnsicht }, "Meine Gerichte")),
       status, liste);
     zeichnen();
@@ -5332,7 +5430,7 @@ async function ansichtEssen() {
 }
 
 // ======================================================================
-// Auswertungen (neu in 2.2.1): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
+// Auswertungen (neu in 2.2.2): Erkenntnisse, Training, Rollentrainer, Gesundheit, Ernährung, Ziele
 // ======================================================================
 const A_ZIELE = "gesundheit.auswertung.ziele", A_AUSR = "gesundheit.auswertung.ausruestung";
 function regression(p_) {
@@ -5771,7 +5869,7 @@ async function start() {
   geruestBauen();
   window.addEventListener("hashchange", route);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!speicher.get(S.darstellung)) neuZeichnen(); });
-  // Immer auf der Startseite starten (neu in 2.2.1)
+  // Immer auf der Startseite starten (neu in 2.2.2)
   if (location.hash && location.hash !== "#heute" && !/k=/.test(location.hash)) history.replaceState(null, "", "#heute");
   await route();
   setTimeout(doppelteFragen, 2000);

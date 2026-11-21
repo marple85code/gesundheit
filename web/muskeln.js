@@ -112,14 +112,15 @@
     let m = "";
     for (const k in r) r[k].forEach((d) => { m += mirror(d, "mu " + c(k), 'stroke="rgba(0,0,0,.18)" stroke-width="0.8"'); });
     let kopf = `<ellipse cx="100" cy="30" rx="18" ry="21" class="s"/><rect x="93" y="48" width="14" height="16" class="s"/>`;
-    if (seite === "v" && opt.bild) kopf = `<rect x="93" y="48" width="14" height="16" class="s"/><defs><clipPath id="${u}c"><circle cx="100" cy="32" r="21"/></clipPath></defs><circle cx="100" cy="32" r="21" class="s"/><image href="${opt.bild}" x="79" y="11" width="42" height="42" clip-path="url(#${u}c)" preserveAspectRatio="xMidYMid slice"/><circle cx="100" cy="32" r="21" fill="none" class="rand"/>`;
+    if (seite === "v" && opt.bild) kopf = `<rect x="92" y="58" width="16" height="12" class="s"/><defs><clipPath id="${u}c"><circle cx="100" cy="32" r="32"/></clipPath></defs><circle cx="100" cy="32" r="32" class="s"/><image href="${opt.bild}" x="68" y="0" width="64" height="64" clip-path="url(#${u}c)" preserveAspectRatio="xMidYMid slice"/><circle cx="100" cy="32" r="32" fill="none" class="rand"/>`;
+    const vy = seite === "v" && opt.bild ? -4 : 0;
     const grad = `<defs><linearGradient id="${u}g" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity=".18"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient></defs>`;
     let stil = "";
     if (thema !== "app") {
       const d = thema === "dunkel";
       stil = `<style>#${u} .s{fill:${d ? "#2c2c2e" : "#e3e3e8"};stroke:${d ? "#48484a" : "#c8c8ce"};stroke-width:1.5}#${u} .rand{stroke:${d ? "#48484a" : "#c8c8ce"};stroke-width:1.5}#${u} .mu{fill:${d ? "#3a3a3c" : "#d2d2d8"}}#${u} .m1{fill:#ffcc00}#${u} .m2{fill:#ff9f0a}#${u} .m3{fill:#ff3b30}</style>`;
     }
-    return `<svg xmlns="http://www.w3.org/2000/svg" id="${u}" viewBox="0 0 200 370" width="${breite}" height="${Math.round(breite * 1.85)}" class="mk-fig-${seite}">${stil}${grad}${mirror(SIL, "s")}${kopf}<g>${m}</g><path d="${SIL}" fill="url(#${u}g)" pointer-events="none"/></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" id="${u}" viewBox="0 ${vy} 200 ${370 - vy}" width="${breite}" height="${Math.round(breite * (370 - vy) / 200)}" class="mk-fig-${seite}">${stil}${grad}${mirror(SIL, "s")}${kopf}<g>${m}</g><path d="${SIL}" fill="url(#${u}g)" pointer-events="none"/></svg>`;
   }
   function figurBild(seite, stufen, thema, bild) {
     return new Promise((ok) => {

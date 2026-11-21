@@ -2,7 +2,7 @@
 (() => {
   "use strict";
   const GROESSEN = { story: [1080, 1920, "Story"], feed: [1080, 1080, "Feed (Facebook)"] };
-    const LAYOUTS = [["suunto", "iOS Kreise"], ["garmin", "Garmin"], ["strava", "Strava"], ["fitness", "Fitness"], ["wahoo", "Wahoo und Polar"], ["glas", "Glas"]];
+    const LAYOUTS = [["suunto", "iOS Kreise"], ["garmin", "Garmin"], ["strava", "Strava"], ["fitness", "Fitness"], ["wahoo", "Wahoo und Polar"], ["glas", "Glas"], ["neon", "Neon"]];
   const HINTERGRUENDE = [
     ["sonne", "Sonnenaufgang", [[0, "#2b4a7a"], [0.45, "#e8886a"], [0.62, "#f7c27a"]], ["#3d5a4a", "#223a30"]],
     ["nacht", "Nacht", [[0, "#0b1230"], [0.6, "#27407a"], [0.85, "#5b6fa8"]], ["#1b2a3a", "#0e1822"]],
@@ -230,6 +230,55 @@
     },
   };
 
+
+  // ---- Neon-Stil: dunkler Grund, leuchtende Rahmen und Schrift in Cyan, Magenta, Gelb, Grün, Rot
+  const NEON = ["#30d5e8", "#ff2bd6", "#ffd60a", "#a4ff3b"];
+  function neonGrund(c, W, H) {
+    c.fillStyle = "#0a0a0f"; c.fillRect(0, 0, W, H); c.strokeStyle = "rgba(255,255,255,.035)"; c.lineWidth = 2;
+    for (let y = 0; y < H; y += 56) { c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+    for (let x = 0; x < W; x += 112) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
+  }
+  function neonText(c, t, x, y, gr, farbe, opt = {}) {
+    for (const b of [28, 12, 4]) { c.save(); c.shadowColor = farbe; c.shadowBlur = b; text(c, t, x, y, gr, { ...opt, farbe: "#fff" === farbe ? "#fff" : farbe }); c.restore(); }
+    text(c, t, x, y, gr, { ...opt, farbe: "#fff", schatten: 0 }); c.globalAlpha = 0.55; text(c, t, x, y, gr, { ...opt, farbe }); c.globalAlpha = 1;
+  }
+  function neonRahmen(c, x, y, w, h, farbe, r = 22) {
+    c.save(); c.strokeStyle = farbe; c.lineWidth = 7; c.shadowColor = farbe; c.shadowBlur = 34; rundRechteck(c, x, y, w, h, r); c.stroke(); c.shadowBlur = 12; c.stroke(); c.restore();
+    c.save(); c.strokeStyle = "rgba(255,255,255,.8)"; c.lineWidth = 2; rundRechteck(c, x, y, w, h, r); c.stroke(); c.restore();
+  }
+  function neonWerte(c, W, H, titel, untertitel, ws, spalten) {
+    neonGrund(c, W, H);
+    text(c, untertitel.toUpperCase(), W / 2, H > 1600 ? 150 : 100, 30, { ausrichtung: "center", farbe: "#8e8e93", spur: 4, max: W - 120 });
+    neonText(c, titel, W / 2, H > 1600 ? 270 : 190, H > 1600 ? 110 : 84, "#ff2bd6", { ausrichtung: "center", schrift: SCHMAL, gewicht: 700, max: W - 120 });
+    const n = ws.length, zl = Math.ceil(n / spalten), top = H > 1600 ? 370 : 270, rand = 60, gap = 30, bw = (W - 2 * rand - gap * (spalten - 1)) / spalten;
+    const bh = Math.min(260, (H - top - 90 - gap * (zl - 1)) / zl);
+    ws.forEach((w, i) => {
+      const x = rand + (i % spalten) * (bw + gap), y = top + Math.floor(i / spalten) * (bh + gap), f = NEON[i % NEON.length];
+      neonRahmen(c, x, y, bw, bh, f); text(c, (w.l || "").toUpperCase(), x + bw / 2, y + bh * 0.3, 26, { ausrichtung: "center", farbe: "#a0a0a8", spur: 2, fit: bw - 40 });
+      neonText(c, w.v + (w.e ? " " + w.e : ""), x + bw / 2, y + bh * 0.72, Math.min(88, bh * 0.4), f, { ausrichtung: "center", schrift: SCHMAL, gewicht: 700, fit: bw - 40 });
+    });
+  }
+  function neonKarte(c, W, H, d) {
+    const ws = [d.w.distanz, d.w.zeit, d.w.tempo, d.w.hf, d.w.auf, d.w.kcal].filter(Boolean).slice(0, 6);
+    neonWerte(c, W, H, d.titel, `${d.datum} · ${d.uhr}`, ws, 2);
+  }
+  function neonHeute(c, W, H, d) {
+    const m = d.muskel; neonGrund(c, W, H);
+    text(c, d.datum.toUpperCase(), W / 2, 110, 30, { ausrichtung: "center", farbe: "#8e8e93", spur: 4, max: W - 120 });
+    neonText(c, "Training heute", W / 2, 210, 88, "#ff2bd6", { ausrichtung: "center", schrift: SCHMAL, gewicht: 700 });
+    const quer = H < 1000, liste = m.akt.slice(0, quer ? 4 : 5), ry = quer ? 270 : 400, rr = quer ? 70 : 120;
+    const cx = quer ? 240 : W / 2;
+    c.save(); c.strokeStyle = "#ff2d55"; c.lineWidth = 12; c.shadowColor = "#ff2d55"; c.shadowBlur = 36; c.beginPath(); c.arc(cx, ry + rr * 0.3, rr, 0, Math.PI * 2); c.stroke(); c.restore();
+    neonText(c, m.zeit, cx, ry + rr * 0.3 + rr * 0.22, quer ? 46 : 70, "#ff9fb3", { ausrichtung: "center", schrift: SCHMAL, gewicht: 700 });
+    text(c, "Stunden gesamt", cx, ry + rr * 1.6, 28, { ausrichtung: "center", farbe: "#9ff" });
+    const x0 = quer ? 480 : 60, bw = W - x0 - (quer ? 50 : 60), top = quer ? 190 : ry + rr * 2.2, gap = 22, kh = Math.min(quer ? 160 : 190, (H - top - 40 - gap * (liste.length - 1)) / Math.max(1, liste.length));
+    liste.forEach((a, i) => {
+      const y = top + i * (kh + gap), f = NEON[i % 2];
+      neonRahmen(c, x0, y, bw, kh, f, 18); text(c, a.name, x0 + 28, y + kh * 0.38, quer ? 30 : 38, { gewicht: 700, farbe: "#fff", max: bw - 56 });
+      text(c, a.werte.map(([l, v]) => v).join("  ·  "), x0 + 28, y + kh * 0.78, quer ? 26 : 32, { schrift: SCHMAL, gewicht: 600, farbe: f, max: bw - 56 });
+    });
+  }
+
   function muskelKarte(c, W, H, d, hell) {
     const m = d.muskel, fg = hell ? "#111" : "#fff", sub = hell ? "#6e6e73" : "#8e8e93", kachel = hell ? "#f2f2f7" : "rgba(255,255,255,.09)";
     const g = c.createLinearGradient(0, 0, W * 0.4, H); if (hell) { g.addColorStop(0, "#fff"); g.addColorStop(1, "#f5f5f7"); } else { g.addColorStop(0, "#1c1c2e"); g.addColorStop(1, "#0b0b12"); }
@@ -284,7 +333,7 @@
     const [W, H] = GROESSEN[groesse]; canvas.width = W; canvas.height = H;
     const c = canvas.getContext("2d"); c.clearRect(0, 0, W, H);
     const F = 210, HI = H - F, tmp = document.createElement("canvas"); tmp.width = W; tmp.height = HI;
-    if (daten.muskel) muskelKarte(tmp.getContext("2d"), W, HI, daten, layout === "mhell"); else if (daten.werte) ZEICHNEN.woche(tmp.getContext("2d"), W, HI, daten, bg, layout); else ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
+    if (daten.muskel) { if (layout === "mneon") neonHeute(tmp.getContext("2d"), W, HI, daten); else muskelKarte(tmp.getContext("2d"), W, HI, daten, layout === "mhell"); } else if (daten.werte && layout === "neon") neonWerte(tmp.getContext("2d"), W, HI, daten.titel, daten.datum, daten.werte.slice(0, 6), 2); else if (daten.werte) ZEICHNEN.woche(tmp.getContext("2d"), W, HI, daten, bg, layout); else if (layout === "neon") neonKarte(tmp.getContext("2d"), W, HI, daten); else ZEICHNEN[layout](tmp.getContext("2d"), W, HI, daten, bg);
     c.drawImage(tmp, 0, 0);
     const hellFuss = layout === "mhell";
     const g = c.createLinearGradient(0, HI, 0, H); g.addColorStop(0, hellFuss ? "#f5f5f7" : "#0b0b0f"); g.addColorStop(1, hellFuss ? "#fff" : "#000"); c.fillStyle = g; c.fillRect(0, HI, W, F);
@@ -295,7 +344,7 @@
 
   function oeffnen(daten) {
     const bg = { id: "sonne", bild: null };
-    const MLAYOUTS = [["mdunkel", "Dunkel"], ["mhell", "Weiß"]], LAY = daten.muskel ? MLAYOUTS : LAYOUTS;
+    const MLAYOUTS = [["mdunkel", "Dunkel"], ["mhell", "Weiß"], ["mneon", "Neon"]], LAY = daten.muskel ? MLAYOUTS : LAYOUTS;
     let layout = daten.muskel ? "mdunkel" : "suunto", groesse = "story";
     const el = (tag, attr, ...kinder) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attr || {})) { if (k === "onclick") e.onclick = v; else if (k === "style") Object.assign(e.style, v); else if (v != null) e.setAttribute(k, v); } e.append(...kinder.flat().filter((x) => x != null)); return e; };
     const dlg = el("dialog", { class: "blatt-dialog teilen-dialog", "aria-label": "Aktivität teilen" });
